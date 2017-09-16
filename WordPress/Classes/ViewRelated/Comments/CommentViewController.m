@@ -5,9 +5,8 @@
 #import "WordPress-Swift.h"
 #import "Comment.h"
 #import "BasePost.h"
-#import "SVProgressHUD.h"
+#import "SVProgressHUD+Dismiss.h"
 #import "EditCommentViewController.h"
-#import "EditReplyViewController.h"
 #import "PostService.h"
 #import "BlogService.h"
 #import "SuggestionsTableView.h"
@@ -48,6 +47,8 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
 @property (nonatomic, assign) NSUInteger                rowNumberForComment;
 @property (nonatomic, assign) NSUInteger                rowNumberForActions;
 
+@property (nonatomic, strong) NSCache                   *estimatedRowHeights;
+
 @end
 
 @implementation CommentViewController
@@ -68,11 +69,10 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
 
     UITableView *tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
     tableView.translatesAutoresizingMaskIntoConstraints = NO;
-    tableView.cellLayoutMarginsFollowReadableWidth = NO;
+    tableView.cellLayoutMarginsFollowReadableWidth = YES;
     tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     tableView.delegate = self;
     tableView.dataSource = self;
-    tableView.estimatedRowHeight = 44.0;
     [tableView addGestureRecognizer:tapRecognizer];
     [self.view addSubview:tableView];
 
@@ -96,10 +96,11 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     }
 
     [self attachSuggestionsTableViewIfNeeded];
-    [self attachReplyViewIfNeeded];
+    [self attachReplyView];
     [self setupAutolayoutConstraints];
-    [self adjustTableViewInsetsIfNeeded];
     [self setupKeyboardManager];
+
+    self.estimatedRowHeights = [[NSCache alloc] init];
 }
 
 - (void)attachSuggestionsTableViewIfNeeded
@@ -115,12 +116,8 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     [self.view addSubview:self.suggestionsTableView];
 }
 
-- (void)attachReplyViewIfNeeded
+- (void)attachReplyView
 {
-    if (![self shouldAttachReplyTextView]) {
-        return;
-    }
-
     __typeof(self) __weak weakSelf = self;
 
     ReplyTextView *replyTextView = [[ReplyTextView alloc] initWithWidth:CGRectGetWidth(self.view.frame)];
@@ -135,16 +132,6 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     [self.view addSubview:self.replyTextView];
 }
 
-- (void)attachEditActionButton
-{
-    UIBarButtonItem *editBarButton = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Edit", @"Verb, start editing")
-                                                                      style:UIBarButtonItemStylePlain
-                                                                     target:self
-                                                                     action:@selector(editComment)];
-    
-    self.navigationItem.rightBarButtonItem = editBarButton;
-}
-
 - (void)setupAutolayoutConstraints
 {
     NSMutableDictionary *views = [@{@"tableView": self.tableView} mutableCopy];
@@ -152,24 +139,16 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
                                                                       options:0
                                                                       metrics:nil
                                                                         views:views]];
-    if ([self shouldAttachReplyTextView]) {
-        self.bottomLayoutConstraint = [self.view.bottomAnchor constraintEqualToAnchor:self.replyTextView.bottomAnchor];
-        self.bottomLayoutConstraint.active = YES;
+    self.bottomLayoutConstraint = [self.view.bottomAnchor constraintEqualToAnchor:self.replyTextView.bottomAnchor];
+    self.bottomLayoutConstraint.active = YES;
 
-        [NSLayoutConstraint activateConstraints:@[
-            [self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-            [self.replyTextView.topAnchor constraintEqualToAnchor:self.tableView.bottomAnchor],
-            [self.replyTextView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-            [self.replyTextView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        ]];
-    }
-    else {
-        [self.view addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[tableView]|"
-                                                                          options:0
-                                                                          metrics:nil
-                                                                            views:views]];
-    }
-    
+    [NSLayoutConstraint activateConstraints:@[
+                                              [self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+                                              [self.replyTextView.topAnchor constraintEqualToAnchor:self.tableView.bottomAnchor],
+                                              [self.replyTextView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+                                              [self.replyTextView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+                                              ]];
+
     if ([self shouldAttachSuggestionsTableView]) {
         // Pin the suggestions view left and right edges to the super view edges
         NSDictionary *views = @{@"suggestionsview": self.suggestionsTableView };
@@ -203,25 +182,10 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
                                                       bottomLayoutConstraint:self.bottomLayoutConstraint];
 }
 
-- (void)adjustTableViewInsetsIfNeeded
-{
-    if ([WPDeviceIdentification isiPad]) {
-        BOOL isPadFullScreen = [self.traitCollection containsTraitsInCollection:[UITraitCollection traitCollectionWithHorizontalSizeClass:UIUserInterfaceSizeClassRegular]];
-        if (isPadFullScreen) {
-            UIEdgeInsets inset = self.tableView.contentInset;
-            inset.top = WPTableViewTopMargin;
-            self.tableView.contentInset = inset;
-        } else {
-            self.tableView.contentInset = UIEdgeInsetsZero;
-        }
-    }
-}
-
 - (void)viewDidLoad
 {
     [super viewDidLoad];
 
-    [self attachEditActionButton];
     [self fetchPostIfNecessary];
     [self reloadData];
 }
@@ -238,13 +202,6 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     [super viewWillDisappear:animated];
 
     [self.keyboardManager stopListeningToKeyboardNotifications];
-}
-
-- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
-{
-    [super traitCollectionDidChange:previousTraitCollection];
-
-    [self adjustTableViewInsetsIfNeeded];
 }
 
 #pragma mark - Fetching Post
@@ -297,6 +254,10 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     return cell;
 }
 
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    [self.estimatedRowHeights setObject:@(cell.frame.size.height) forKey:indexPath];
+}
 
 #pragma mark - Table view delegate
 
@@ -311,8 +272,17 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
         }
 
         ReaderDetailViewController *vc = [ReaderDetailViewController controllerWithPostID:self.comment.postID siteID:self.comment.blog.dotComID];
-        [self.navigationController pushViewController:vc animated:YES];
+        [self.navigationController pushFullscreenViewController:vc animated:YES];
     }
+}
+
+- (CGFloat)tableView:(UITableView *)tableView estimatedHeightForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    NSNumber *cachedHeight = [self.estimatedRowHeights objectForKey:indexPath];
+    if (cachedHeight.doubleValue) {
+        return cachedHeight.doubleValue;
+    }
+    return WPTableViewDefaultRowHeight;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -325,12 +295,6 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
 - (void)setupCell:(UITableViewCell *)cell
 {
     NSParameterAssert(cell);
-
-    if ([cell isKindOfClass:[WPTableViewCell class]]) {
-        // Temporarily force margins for WPTableViewCell hack.
-        // Brent C. Jul/19/2016
-        [(WPTableViewCell *)cell setForceCustomCellMargins:YES];
-    }
 
     // This is gonna look way better in Swift!
     if ([cell isKindOfClass:[NoteBlockHeaderTableViewCell class]]) {
@@ -371,7 +335,7 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
 
     // Setup the Fields
     cell.name = self.comment.author;
-    cell.timestamp = [self.comment.dateCreated shortString];
+    cell.timestamp = [self.comment.dateCreated mediumString];
     cell.site = self.comment.authorUrlForDisplay;
     cell.commentText = [self.comment contentForDisplay];
     cell.isApproved = [self.comment.status isEqualToString:CommentStatusApproved];
@@ -413,7 +377,7 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     __weak __typeof(self) weakSelf = self;
 
     cell.onReplyClick = ^(UIButton *sender) {
-        [weakSelf editReply];
+        [weakSelf focusOnReplyTextView];
     };
 
     cell.onLikeClick = ^(UIButton *sender){
@@ -438,6 +402,10 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
 
     cell.onSpamClick = ^(UIButton *sender){
         [weakSelf spamComment];
+    };
+
+    cell.onEditClick = ^(UIButton *sender) {
+        [weakSelf editComment];
     };
 }
 
@@ -464,7 +432,7 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     __typeof(self) __weak weakSelf = self;
 
     if (!self.comment.isLiked) {
-        [WPNotificationFeedbackGenerator notificationOccurred:WPNotificationFeedbackTypeSuccess];
+        [[UINotificationFeedbackGenerator new] notificationOccurred:UINotificationFeedbackTypeSuccess];
     }
 
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
@@ -646,25 +614,12 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
 
 #pragma mark - Replying Comments for iPad
 
-- (void)editReply
+- (void)focusOnReplyTextView
 {
-    __typeof(self) __weak weakSelf = self;
-    
-    EditReplyViewController *editViewController = [EditReplyViewController newReplyViewControllerForSiteID:self.comment.blog.dotComID];
-
-    editViewController.onCompletion = ^(BOOL hasNewContent, NSString *newContent) {
-        [self dismissViewControllerAnimated:YES completion:^{
-            if (hasNewContent) {
-                [weakSelf sendReplyWithNewContent:newContent];
-            }
-        }];
-    };
-
-    UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:editViewController];
-    navController.modalPresentationStyle = UIModalPresentationFormSheet;
-    navController.modalTransitionStyle = UIModalTransitionStyleCoverVertical;
-    navController.navigationBar.translucent = NO;
-    [self presentViewController:navController animated:true completion:nil];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-result"
+    [self.replyTextView becomeFirstResponder];
+#pragma clang diagnostic pop
 }
 
 - (void)sendReplyWithNewContent:(NSString *)content
@@ -674,7 +629,7 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
     __typeof(self) __weak weakSelf = self;
     
     void (^successBlock)() = ^void() {
-        [SVProgressHUD showSuccessWithStatus:successMessage];
+        [SVProgressHUD showDismissibleSuccessWithStatus:successMessage];
     };
     
     void (^failureBlock)(NSError *error) = ^void(NSError *error) {
@@ -762,16 +717,9 @@ typedef NS_ENUM(NSUInteger, CommentsDetailsRow) {
 
 #pragma mark - Helpers
 
-- (BOOL)shouldAttachReplyTextView
-{
-    // iPad: We've got a different UI!
-    return ![UIDevice isPad];
-}
-
 - (BOOL)shouldAttachSuggestionsTableView
 {
-    BOOL shouldShowSuggestions = [[SuggestionService sharedInstance] shouldShowSuggestionsForSiteID:self.comment.blog.dotComID];
-    return self.shouldAttachReplyTextView && shouldShowSuggestions;
+    return [[SuggestionService sharedInstance] shouldShowSuggestionsForSiteID:self.comment.blog.dotComID];
 }
 
 - (void)reloadData

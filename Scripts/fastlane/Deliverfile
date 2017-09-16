@@ -1,4 +1,3 @@
-load "wordpress_translation_retrieval.rb"
 #
 # For more information about each property, visit the GitHub documentation: https://github.com/krausefx/deliver
 # Everything next to a # is a comment and will be ignored
@@ -16,34 +15,20 @@ screenshots_path "./screenshots/"
 app_identifier "org.wordpress"
 
 # Make sure to update these keys for a new version
-version "4.9"
-glotpress_whats_new_key = "v4.9-whats-new"
+app_version "8.3"
 
-changelog({
-    "en-US" => WordPressTranslationRetrieval.get_version_text("en-US", glotpress_whats_new_key),
-    "en-CA" => WordPressTranslationRetrieval.get_version_text("en-CA", glotpress_whats_new_key),
-    "en-AU" => WordPressTranslationRetrieval.get_version_text("en-AU", glotpress_whats_new_key),
-    "es-ES" => WordPressTranslationRetrieval.get_version_text("es-ES", glotpress_whats_new_key),
-    "fr-FR" => WordPressTranslationRetrieval.get_version_text("fr-FR", glotpress_whats_new_key),
-    "it-IT" => WordPressTranslationRetrieval.get_version_text("it-IT", glotpress_whats_new_key),
-    "ja-JP" => WordPressTranslationRetrieval.get_version_text("ja-JP", glotpress_whats_new_key),
-    "sv-SE" => WordPressTranslationRetrieval.get_version_text("sv-SE", glotpress_whats_new_key),
-    "pt-BR" => WordPressTranslationRetrieval.get_version_text("pt-BR", glotpress_whats_new_key),
-    "nl-NL" => WordPressTranslationRetrieval.get_version_text("nl-NL", glotpress_whats_new_key),
-    "de-DE" => WordPressTranslationRetrieval.get_version_text("de-DE", glotpress_whats_new_key),
-    "id-ID" => WordPressTranslationRetrieval.get_version_text("id-ID", glotpress_whats_new_key),
-    "ko-KR" => WordPressTranslationRetrieval.get_version_text("ko-KR", glotpress_whats_new_key),
-    "ru-RU" => WordPressTranslationRetrieval.get_version_text("ru-RU", glotpress_whats_new_key),
-    "cmn-Hans" => WordPressTranslationRetrieval.get_version_text("cmn-Hans", glotpress_whats_new_key),
-    "th-TH" => WordPressTranslationRetrieval.get_version_text("th-TH", glotpress_whats_new_key),
-    "cmn-Hant" => WordPressTranslationRetrieval.get_version_text("cmn-Hant", glotpress_whats_new_key),
-    "tr-TR" => WordPressTranslationRetrieval.get_version_text("tr-TR", glotpress_whats_new_key),
-    "en-GB" => WordPressTranslationRetrieval.get_version_text("en-GB", glotpress_whats_new_key),
+privacy_url({
+  'default' => 'https://automattic.com/privacy/',
 })
+
+copyright('2017 Automattic Inc.')
+
+skip_binary_upload true
+overwrite_screenshots true
 
 # version '1.2' # you can pass this if you want to verify the version number with the ipa file
 
-config_json_folder './deliver'
+# config_json_folder './deliver'
 
 ########################################
 # Building and Testing
@@ -60,7 +45,7 @@ config_json_folder './deliver'
     # If you only want to upload app metadata, remove the complete ipa block.
 
     # system("ipa build --verbose") # build your project using Shenzhen
-    "./WordPress-Deliver-iOS.ipa" # Tell 'Deliver' where it can find the finished ipa file
+    # "./WordPress-Deliver-iOS.ipa" # Tell 'Deliver' where it can find the finished ipa file
 # end
 
 # ipa "./latest.ipa" # this can be used instead of the `do` block, if you prefer manually building the ipa file
@@ -75,6 +60,6 @@ config_json_folder './deliver'
 #   system("xctool test")
 # end
 
-success do
+# success do
   # system("say 'Successfully deployed a new version.'")
-end
+# end

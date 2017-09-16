@@ -1,5 +1,6 @@
 import Foundation
-
+import CocoaLumberjack
+import WordPressKit
 
 /// Notes:
 ///
@@ -21,33 +22,32 @@ let NotificationSyncMediatorDidUpdateNotifications = "NotificationSyncMediatorDi
 
 // MARK: - NotificationSyncMediator
 //
-class NotificationSyncMediator
-{
+class NotificationSyncMediator {
     /// Returns the Main Managed Context
     ///
-    private let contextManager: ContextManager
+    fileprivate let contextManager: ContextManager
 
     /// Sync Service Remote
     ///
-    private let remote: NotificationSyncServiceRemote
+    fileprivate let remote: NotificationSyncServiceRemote
 
     /// Maximum number of Notes to Sync
     ///
-    private let maximumNotes = 100
+    fileprivate let maximumNotes = 100
 
     /// Main CoreData Context
     ///
-    private var mainContext: NSManagedObjectContext {
+    fileprivate var mainContext: NSManagedObjectContext {
         return contextManager.mainContext
     }
 
     /// Thread Safety Helper!
     ///
-    private static let lock = NSLock()
+    fileprivate static let lock = NSLock()
 
     /// Shared PrivateContext among all of the Sync Service Instances
     ///
-    private static var privateContext: NSManagedObjectContext!
+    fileprivate static var privateContext: NSManagedObjectContext!
 
 
 
@@ -89,8 +89,8 @@ class NotificationSyncMediator
     /// - Only those Notifications that were remotely changed (Updated / Inserted) will be retrieved
     /// - Local collection will be updated. Old notes will be purged!
     ///
-    func sync(completion: ((ErrorType?, Bool) -> Void)? = nil) {
-        assert(NSThread.isMainThread())
+    func sync(_ completion: ((Error?, Bool) -> Void)? = nil) {
+        assert(Thread.isMainThread)
 
         remote.loadHashes(withPageSize: maximumNotes) { error, remoteHashes in
             guard let remoteHashes = remoteHashes else {
@@ -131,27 +131,26 @@ class NotificationSyncMediator
     ///     - noteId: Notification ID of the note to be downloaded.
     ///     - completion: Closure to be executed on completion.
     ///
-    func syncNote(with noteId: String, completion: ((ErrorType?, Notification?) -> Void)) {
-        assert(NSThread.isMainThread())
+    func syncNote(with noteId: String, completion: ((Error?, Notification?) -> Void)? = nil) {
+        assert(Thread.isMainThread)
 
         remote.loadNotes(noteIds: [noteId]) { error, remoteNotes in
             guard let remoteNotes = remoteNotes else {
-                completion(error, nil)
+                completion?(error, nil)
                 return
             }
 
             self.updateLocalNotes(with: remoteNotes) {
-                let helper = CoreDataHelper<Notification>(context: self.mainContext)
                 let predicate = NSPredicate(format: "(notificationId == %@)", noteId)
-                let note = helper.firstObject(matchingPredicate: predicate)
+                let note = self.mainContext.firstObject(ofType: Notification.self, matching: predicate)
 
-                completion(nil, note)
+                completion?(nil, note)
             }
         }
     }
 
 
-    /// Marks a Notification as Read. On error, proceeds to revert the change.
+    /// Marks a Notification as Read.
     ///
     /// - Note: This method should only be used on the main thread.
     ///
@@ -159,15 +158,23 @@ class NotificationSyncMediator
     ///     - notification: The notification that was just read.
     ///     - completion: Callback to be executed on completion.
     ///
-    func markAsRead(notification: Notification, completion: (ErrorType?-> Void)? = nil) {
-        assert(NSThread.isMainThread())
+    func markAsRead(_ notification: Notification, completion: ((Error?)-> Void)? = nil) {
+        assert(Thread.isMainThread)
 
-        let original = notification.read
-
-        remote.updateReadStatus(notification.notificationId, read: true) { error in
+        let noteID = notification.notificationId
+        remote.updateReadStatus(noteID, read: true) { error in
             if let error = error {
-                DDLogSwift.logError("Error marking note as read: \(error)")
-                self.updateReadStatus(original, forNoteWithObjectID: notification.objectID)
+                DDLogError("Error marking note as read: \(error)")
+                // Ideally, we'd want to revert to the unread status if this
+                // fails, but if the note is visible, the UI layer will keep
+                // trying to mark this as read and fail.
+                //
+                // While not a perfect UX, the easy way out is to pretend it
+                // worked, but invalidate the cache so it can be reverted in the
+                // next successful sync.
+                //
+                // https://github.com/wordpress-mobile/WordPress-iOS/issues/7216
+                NotificationSyncMediator()?.invalidateCacheForNotification(with: noteID)
             }
 
             completion?(error)
@@ -176,6 +183,23 @@ class NotificationSyncMediator
         updateReadStatus(true, forNoteWithObjectID: notification.objectID)
     }
 
+    /// Invalidates the cache for a notification, marks it as read and syncs it.
+    ///
+    /// - Parameters:
+    ///     - noteID: The notification id to mark as read.
+    ///     - completion: Callback to be executed on completion.
+    ///
+    func markAsReadAndSync(_ noteID: String, completion: ((Error?) -> Void)? = nil) {
+        invalidateCacheForNotification(with: noteID)
+        remote.updateReadStatus(noteID, read: true) { error in
+            if let error = error {
+                DDLogError("Error marking note as read: \(error)")
+            }
+            self.syncNote(with: noteID) { _ in
+                completion?(error)
+            }
+        }
+    }
 
     /// Updates the Backend's Last Seen Timestamp. Used to calculate the Badge Count!
     ///
@@ -185,15 +209,48 @@ class NotificationSyncMediator
     ///     - timestamp: Timestamp of the last seen notification.
     ///     - completion: Callback to be executed on completion.
     ///
-    func updateLastSeen(timestamp: String, completion: (ErrorType? -> Void)? = nil) {
-        assert(NSThread.isMainThread())
+    func updateLastSeen(_ timestamp: String, completion: ((Error?) -> Void)? = nil) {
+        assert(Thread.isMainThread)
 
         remote.updateLastSeen(timestamp) { error in
             if let error = error {
-                DDLogSwift.logError("Error while Updating Last Seen Timestamp: \(error)")
+                DDLogError("Error while Updating Last Seen Timestamp: \(error)")
             }
 
             completion?(error)
+        }
+    }
+
+    /// Deletes the note with the given ID from Core Data.
+    ///
+    func deleteNote(noteID: String) {
+        let derivedContext = type(of: self).sharedDerivedContext(with: contextManager)
+
+        derivedContext.perform {
+            let predicate = NSPredicate(format: "(notificationId == %@)", noteID)
+
+            for orphan in derivedContext.allObjects(ofType: Notification.self, matching: predicate) {
+                derivedContext.deleteObject(orphan)
+            }
+
+            self.contextManager.saveDerivedContext(derivedContext)
+        }
+    }
+
+    /// Invalidates the local cache for the notification with the specified ID.
+    ///
+    func invalidateCacheForNotification(with noteID: String) {
+        let derivedContext = type(of: self).sharedDerivedContext(with: contextManager)
+        let predicate = NSPredicate(format: "(notificationId == %@)", noteID)
+
+        derivedContext.perform {
+            guard let notification = derivedContext.firstObject(ofType: Notification.self, matching: predicate) else {
+                return
+            }
+
+            notification.notificationHash = nil
+
+            self.contextManager.saveDerivedContext(derivedContext)
         }
     }
 }
@@ -201,8 +258,7 @@ class NotificationSyncMediator
 
 // MARK: - Private Helpers
 //
-private extension NotificationSyncMediator
-{
+private extension NotificationSyncMediator {
     /// Given a collection of RemoteNotification Hashes, this method will determine the NotificationID's
     /// that are either missing in our database, or have been remotely updated.
     ///
@@ -210,16 +266,15 @@ private extension NotificationSyncMediator
     ///     - remoteHashes: Collection of Notification Hashes
     ///     - completion: Callback to be executed on completion
     ///
-    func determineUpdatedNotes(with remoteHashes: [RemoteNotification], completion: ([String] -> Void)) {
-        let derivedContext = self.dynamicType.sharedDerivedContext(with: contextManager)
-        let helper = CoreDataHelper<Notification>(context: derivedContext)
+    func determineUpdatedNotes(with remoteHashes: [RemoteNotification], completion: @escaping (([String]) -> Void)) {
+        let derivedContext = type(of: self).sharedDerivedContext(with: contextManager)
 
-        derivedContext.performBlock {
+        derivedContext.perform {
             let remoteIds = remoteHashes.map { $0.notificationId }
             let predicate = NSPredicate(format: "(notificationId IN %@)", remoteIds)
             var localHashes = [String: String]()
 
-            for note in helper.allObjects(matchingPredicate: predicate) {
+            for note in derivedContext.allObjects(ofType: Notification.self, matching: predicate) {
                 localHashes[note.notificationId] = note.notificationHash ?? ""
             }
 
@@ -232,7 +287,7 @@ private extension NotificationSyncMediator
 
             let outdatedIds = filtered.map { $0.notificationId }
 
-            dispatch_async(dispatch_get_main_queue()) {
+            DispatchQueue.main.async {
                 completion(outdatedIds)
             }
         }
@@ -246,20 +301,19 @@ private extension NotificationSyncMediator
     ///     - remoteNotes: Collection of Remote Notes
     ///     - completion: Callback to be executed on completion
     ///
-    func updateLocalNotes(with remoteNotes: [RemoteNotification], completion: (Void -> Void)? = nil) {
-        let derivedContext = self.dynamicType.sharedDerivedContext(with: contextManager)
-        let helper = CoreDataHelper<Notification>(context: derivedContext)
+    func updateLocalNotes(with remoteNotes: [RemoteNotification], completion: (() -> Void)? = nil) {
+        let derivedContext = type(of: self).sharedDerivedContext(with: contextManager)
 
-        derivedContext.performBlock {
+        derivedContext.perform {
             for remoteNote in remoteNotes {
                 let predicate = NSPredicate(format: "(notificationId == %@)", remoteNote.notificationId)
-                let localNote = helper.firstObject(matchingPredicate: predicate) ?? helper.insertNewObject()
+                let localNote = derivedContext.firstObject(ofType: Notification.self, matching: predicate) ?? derivedContext.insertNewObject(ofType: Notification.self)
 
                 localNote.update(with: remoteNote)
             }
 
             self.contextManager.saveDerivedContext(derivedContext) {
-                dispatch_async(dispatch_get_main_queue()) {
+                DispatchQueue.main.async {
                     completion?()
                 }
             }
@@ -272,20 +326,19 @@ private extension NotificationSyncMediator
     ///
     /// - Parameter remoteHashes: Collection of remoteNotifications.
     ///
-    func deleteLocalMissingNotes(from remoteHashes: [RemoteNotification], completion: (Void -> Void)) {
-        let derivedContext = self.dynamicType.sharedDerivedContext(with: contextManager)
-        let helper = CoreDataHelper<Notification>(context: derivedContext)
+    func deleteLocalMissingNotes(from remoteHashes: [RemoteNotification], completion: @escaping (() -> Void)) {
+        let derivedContext = type(of: self).sharedDerivedContext(with: contextManager)
 
-        derivedContext.performBlock {
+        derivedContext.perform {
             let remoteIds = remoteHashes.map { $0.notificationId }
             let predicate = NSPredicate(format: "NOT (notificationId IN %@)", remoteIds)
 
-            for orphan in helper.allObjects(matchingPredicate: predicate) {
-                helper.deleteObject(orphan)
+            for orphan in derivedContext.allObjects(ofType: Notification.self, matching: predicate) {
+                derivedContext.deleteObject(orphan)
             }
 
             self.contextManager.saveDerivedContext(derivedContext) {
-                dispatch_async(dispatch_get_main_queue()) {
+                DispatchQueue.main.async {
                     completion()
                 }
             }
@@ -302,9 +355,8 @@ private extension NotificationSyncMediator
     ///     - status: New *read* value
     ///     - noteObjectID: CoreData ObjectID
     ///
-    func updateReadStatus(status: Bool, forNoteWithObjectID noteObjectID: NSManagedObjectID) {
-        let helper = CoreDataHelper<Notification>(context: mainContext)
-        let note = helper.loadObject(withObjectID: noteObjectID)
+    func updateReadStatus(_ status: Bool, forNoteWithObjectID noteObjectID: NSManagedObjectID) {
+        let note = mainContext.loadObject(ofType: Notification.self, with: noteObjectID)
         note?.read = status
         contextManager.saveContextAndWait(mainContext)
     }
@@ -314,8 +366,8 @@ private extension NotificationSyncMediator
     /// may react upon new content.
     ///
     func notifyNotificationsWereUpdated() {
-        let notificationCenter = NSNotificationCenter.defaultCenter()
-        notificationCenter.postNotificationName(NotificationSyncMediatorDidUpdateNotifications, object: nil)
+        let notificationCenter = NotificationCenter.default
+        notificationCenter.post(name: Foundation.Notification.Name(rawValue: NotificationSyncMediatorDidUpdateNotifications), object: nil)
     }
 }
 
@@ -323,8 +375,7 @@ private extension NotificationSyncMediator
 
 // MARK: - Thread Safety Helpers
 //
-extension NotificationSyncMediator
-{
+extension NotificationSyncMediator {
     /// Returns the current Shared Derived Context, if any. Otherwise, proceeds to create a new
     /// derived context, given a specified ContextManager.
     ///

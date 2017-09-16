@@ -1,4 +1,5 @@
 #import "LoginFields.h"
+#import "WordPress-Swift.h"
 
 @implementation LoginFields
 
@@ -33,5 +34,13 @@
     return self;
 }
 
+- (NSDictionary *)helpshiftLoginOptions
+{
+    return @{
+             @"Source": @"Login",
+             @"Username": self.username,
+             @"SiteURL": self.siteUrl
+             };
+}
 
 @end

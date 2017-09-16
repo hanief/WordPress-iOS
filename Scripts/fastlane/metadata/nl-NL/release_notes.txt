@@ -1,0 +1,2 @@
+Jetpack-sites: ondersteuning voor aangepaste rollen toegevoegd.
+Verschillende kleine verbeteringen en bugfixes.

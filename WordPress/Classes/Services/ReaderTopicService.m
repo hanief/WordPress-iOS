@@ -2,15 +2,12 @@
 
 #import "AccountService.h"
 #import "ContextManager.h"
-#import "NSString+XMLExtensions.h"
 #import "ReaderPost.h"
 #import "ReaderPostService.h"
-#import "ReaderPostServiceRemote.h"
-#import "RemoteReaderSiteInfo.h"
-#import "ReaderTopicServiceRemote.h"
-#import "RemoteReaderTopic.h"
-#import "WordPress-Swift.h"
 #import "WPAccount.h"
+#import <WordPressShared/NSString+XMLExtensions.h>
+#import "WordPress-Swift.h"
+@import WordPressKit;
 
 NSString * const ReaderTopicDidChangeViaUserInteractionNotification = @"ReaderTopicDidChangeViaUserInteractionNotification";
 NSString * const ReaderTopicDidChangeNotification = @"ReaderTopicDidChangeNotification";
@@ -166,6 +163,7 @@ static NSString * const ReaderTopicCurrentTopicPathKey = @"ReaderTopicCurrentTop
     }
 
     for (ReaderAbstractTopic *topic in results) {
+        DDLogInfo(@"Deleting topic: %@", topic.title);
         [self.managedObjectContext deleteObject:topic];
     }
     [self.managedObjectContext performBlockAndWait:^{
@@ -176,7 +174,7 @@ static NSString * const ReaderTopicCurrentTopicPathKey = @"ReaderTopicCurrentTop
 - (void)deleteNonMenuTopics
 {
     NSFetchRequest *request = [NSFetchRequest fetchRequestWithEntityName:[ReaderAbstractTopic classNameWithoutNamespaces]];
-    request.predicate = [NSPredicate predicateWithFormat:@"showInMenu = false AND preserveForRestoration = false"];
+    request.predicate = [NSPredicate predicateWithFormat:@"showInMenu = false AND inUse = false"];
 
     NSError *error;
     NSArray *results = [self.managedObjectContext executeFetchRequest:request error:&error];
@@ -190,6 +188,7 @@ static NSString * const ReaderTopicCurrentTopicPathKey = @"ReaderTopicCurrentTop
         if ([topic isKindOfClass:[ReaderSiteTopic class]] && topic.following) {
             continue;
         }
+        DDLogInfo(@"Deleting topic: %@", topic.title);
         [self.managedObjectContext deleteObject:topic];
     }
     [self.managedObjectContext performBlockAndWait:^{
@@ -197,11 +196,30 @@ static NSString * const ReaderTopicCurrentTopicPathKey = @"ReaderTopicCurrentTop
     }];
 }
 
+- (void)clearInUseFlags
+{
+    NSError *error;
+    NSFetchRequest *request = [[NSFetchRequest alloc] initWithEntityName:[ReaderAbstractTopic classNameWithoutNamespaces]];
+    request.predicate = [NSPredicate predicateWithFormat:@"inUse = true"];
+    NSArray *results = [self.managedObjectContext executeFetchRequest:request error:&error];
+    if (error) {
+        DDLogError(@"%@, marking topic not in use.: %@", NSStringFromSelector(_cmd), error);
+        return;
+    }
+
+    for (ReaderAbstractTopic *topic in results) {
+        topic.inUse = NO;
+    }
+
+    [[ContextManager sharedInstance] saveContextAndWait:self.managedObjectContext];
+}
+
 - (void)deleteAllTopics
 {
     [self setCurrentTopic:nil];
     NSArray *currentTopics = [self allTopics];
     for (ReaderAbstractTopic *topic in currentTopics) {
+        DDLogInfo(@"Deleting topic: %@", topic.title);
         [self.managedObjectContext deleteObject:topic];
     }
     [self.managedObjectContext performBlockAndWait:^{
@@ -482,7 +500,17 @@ static NSString * const ReaderTopicCurrentTopicPathKey = @"ReaderTopicCurrentTop
         if (newFollowValue) {
             [siteService followSiteWithID:[topic.siteID integerValue] success:successBlock failure:failureBlock];
         } else {
-            [siteService unfollowSiteWithID:[topic.siteID integerValue] success:successBlock failure:failureBlock];
+            // Try to unfollow by ID as its the most reliable method.
+            // Note that if the site has been deleted, attempting to unfollow by ID
+            // results in an HTTP 403 on the v1.1 endpoint.  If this happens try
+            // unfollowing via the less reliable URL method.
+            [siteService unfollowSiteWithID:[topic.siteID integerValue] success:successBlock failure:^(NSError *error) {
+                if (error.code == WordPressComRestApiErrorAuthorizationRequired) {
+                    [siteService unfollowSiteAtURL:topic.siteURL success:successBlock failure:failureBlock];
+                    return;
+                }
+                failureBlock(error);
+            }];
         }
     }
 }
@@ -863,11 +891,21 @@ static NSString * const ReaderTopicCurrentTopicPathKey = @"ReaderTopicCurrentTop
         if ([currentTopics count] > 0) {
             for (ReaderAbstractTopic *topic in currentTopics) {
                 if (![topic isKindOfClass:[ReaderSiteTopic class]] && ![topicsToKeep containsObject:topic]) {
-                    DDLogInfo(@"Deleting Reader Topic: %@", topic);
                     if ([topic isEqual:self.currentTopic]) {
                         self.currentTopic = nil;
                     }
-                    [self.managedObjectContext deleteObject:topic];
+                    if (topic.inUse) {
+                        // If the topic is in use just set showInMenu to false
+                        // and let it be cleaned up like any other non-menu topic.
+                        DDLogInfo(@"Removing topic from menu: %@", topic.title);
+                        topic.showInMenu = NO;
+                        // Followed topics are always in the menu, so if we're
+                        // removing the topic, if it was once followed its not now.
+                        topic.following = NO;
+                    } else {
+                        DDLogInfo(@"Deleting topic: %@", topic.title);
+                        [self.managedObjectContext deleteObject:topic];
+                    }
                 }
             }
         }

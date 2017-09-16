@@ -1,26 +1,28 @@
 import Foundation
-
+import CocoaLumberjack
 
 /// This service encapsulates all of the Actions that can be performed with a NotificationBlock
 ///
-public class NotificationActionsService: LocalCoreDataService
-{
+open class NotificationActionsService: LocalCoreDataService {
+
     /// Follows a Site referenced by a given NotificationBlock.
     ///
     /// - Parameter block: The Notification's Site Block
     /// - Parameter completion: Closure block to be executed on completion, indicating if we've succeeded or not.
     ///
-    func followSiteWithBlock(block: NotificationBlock, completion: (Bool -> Void)? = nil) {
-        guard let siteID = block.metaSiteID?.unsignedIntegerValue else {
+    func followSiteWithBlock(_ block: NotificationBlock, completion: ((Bool) -> Void)? = nil) {
+        guard let siteID = block.metaSiteID?.uintValue else {
             completion?(false)
             return
         }
 
-        siteService.followSiteWithID(siteID, success: {
-            DDLogSwift.logInfo("Successfully followed site \(siteID)")
+        siteService.followSite(withID: siteID, success: {
+            DDLogInfo("Successfully followed site \(siteID)")
+            self.invalidateCacheAndForceSyncNotification(with: block)
             completion?(true)
+
         }, failure: { error in
-            DDLogSwift.logError("Error while trying to follow site: \(error)")
+            DDLogError("Error while trying to follow site: \(String(describing: error))")
             block.removeOverrideValueForAction(.Follow)
             completion?(false)
         })
@@ -34,17 +36,19 @@ public class NotificationActionsService: LocalCoreDataService
     /// - Parameter block: The Notification's Site Block
     /// - Parameter completion: Closure block to be executed on completion, indicating if we've succeeded or not.
     ///
-    func unfollowSiteWithBlock(block: NotificationBlock, completion: (Bool -> Void)? = nil) {
-        guard let siteID = block.metaSiteID?.unsignedIntegerValue else {
+    func unfollowSiteWithBlock(_ block: NotificationBlock, completion: ((Bool) -> Void)? = nil) {
+        guard let siteID = block.metaSiteID?.uintValue else {
             completion?(false)
             return
         }
 
-        siteService.unfollowSiteWithID(siteID, success: {
-            DDLogSwift.logInfo("Successfully unfollowed site \(siteID)")
+        siteService.unfollowSite(withID: siteID, success: {
+            DDLogInfo("Successfully unfollowed site \(siteID)")
+            self.invalidateCacheAndForceSyncNotification(with: block)
             completion?(true)
+
         }, failure: { error in
-            DDLogSwift.logError("Error while trying to unfollow site: \(error)")
+            DDLogError("Error while trying to unfollow site: \(String(describing: error))")
             block.removeOverrideValueForAction(.Follow)
             completion?(false)
         })
@@ -59,17 +63,19 @@ public class NotificationActionsService: LocalCoreDataService
     /// - Parameter content: The Reply's Content
     /// - Parameter completion: Closure block to be executed on completion, indicating if we've succeeded or not.
     ///
-    func replyCommentWithBlock(block: NotificationBlock, content: String, completion: (Bool -> Void)? = nil) {
-        guard let commentID = block.metaCommentID, siteID = block.metaSiteID else {
+    func replyCommentWithBlock(_ block: NotificationBlock, content: String, completion: ((Bool) -> Void)? = nil) {
+        guard let commentID = block.metaCommentID, let siteID = block.metaSiteID else {
             completion?(false)
             return
         }
 
-        commentService.replyToCommentWithID(commentID, siteID: siteID, content: content, success: {
-            DDLogSwift.logInfo("Successfully replied to comment \(siteID).\(commentID)")
+        commentService.replyToComment(withID: commentID, siteID: siteID, content: content, success: {
+            DDLogInfo("Successfully replied to comment \(siteID).\(commentID)")
+            self.invalidateCacheAndForceSyncNotification(with: block)
             completion?(true)
+
         }, failure: { error in
-            DDLogSwift.logError("Error while trying to reply comment: \(error)")
+            DDLogError("Error while trying to reply comment: \(String(describing: error))")
             completion?(false)
         })
     }
@@ -81,8 +87,8 @@ public class NotificationActionsService: LocalCoreDataService
     /// - Parameter content: The Comment's New Content
     /// - Parameter completion: Closure block to be executed on completion, indicating if we've succeeded or not.
     ///
-    func updateCommentWithBlock(block: NotificationBlock, content: String, completion: (Bool -> Void)? = nil) {
-        guard let commentID = block.metaCommentID, siteID = block.metaSiteID else {
+    func updateCommentWithBlock(_ block: NotificationBlock, content: String, completion: ((Bool) -> Void)? = nil) {
+        guard let commentID = block.metaCommentID, let siteID = block.metaSiteID else {
             completion?(false)
             return
         }
@@ -91,11 +97,13 @@ public class NotificationActionsService: LocalCoreDataService
         block.textOverride = content
 
         // Hit the backend
-        commentService.updateCommentWithID(commentID, siteID: siteID, content: content, success: {
-            DDLogSwift.logInfo("Successfully updated to comment \(siteID).\(commentID)")
+        commentService.updateComment(withID: commentID, siteID: siteID, content: content, success: {
+            DDLogInfo("Successfully updated to comment \(siteID).\(commentID)")
+            self.invalidateCacheAndForceSyncNotification(with: block)
             completion?(true)
+
         }, failure: { error in
-            DDLogSwift.logError("Error while trying to update comment: \(error)")
+            DDLogError("Error while trying to update comment: \(String(describing: error))")
             completion?(false)
         })
     }
@@ -106,8 +114,8 @@ public class NotificationActionsService: LocalCoreDataService
     /// - Parameter block: The Notification's Comment Block
     /// - Parameter completion: Closure block to be executed on completion, indicating if we've succeeded or not.
     ///
-    func likeCommentWithBlock(block: NotificationBlock, completion: (Bool -> Void)? = nil) {
-        guard let commentID = block.metaCommentID, siteID = block.metaSiteID else {
+    func likeCommentWithBlock(_ block: NotificationBlock, completion: ((Bool) -> Void)? = nil) {
+        guard let commentID = block.metaCommentID, let siteID = block.metaSiteID else {
             completion?(false)
             return
         }
@@ -118,11 +126,13 @@ public class NotificationActionsService: LocalCoreDataService
         }
 
         // Proceed toggling the Like field
-        commentService.likeCommentWithID(commentID, siteID: siteID, success: {
-            DDLogSwift.logInfo("Successfully liked comment \(siteID).\(commentID)")
+        commentService.likeComment(withID: commentID, siteID: siteID, success: {
+            DDLogInfo("Successfully liked comment \(siteID).\(commentID)")
+            self.invalidateCacheAndForceSyncNotification(with: block)
             completion?(true)
+
         }, failure: { error in
-            DDLogSwift.logError("Error while trying to like comment: \(error)")
+            DDLogError("Error while trying to like comment: \(String(describing: error))")
             block.removeOverrideValueForAction(.Like)
             completion?(false)
         })
@@ -136,17 +146,19 @@ public class NotificationActionsService: LocalCoreDataService
     /// - Parameter block: The Notification's Comment Block
     /// - Parameter completion: Closure block to be executed on completion, indicating if we've succeeded or not.
     ///
-    func unlikeCommentWithBlock(block: NotificationBlock, completion: (Bool -> Void)? = nil) {
-        guard let commentID = block.metaCommentID, siteID = block.metaSiteID else {
+    func unlikeCommentWithBlock(_ block: NotificationBlock, completion: ((Bool) -> Void)? = nil) {
+        guard let commentID = block.metaCommentID, let siteID = block.metaSiteID else {
             completion?(false)
             return
         }
 
-        commentService.unlikeCommentWithID(commentID, siteID: siteID, success: {
-            DDLogSwift.logInfo("Successfully unliked comment \(siteID).\(commentID)")
+        commentService.unlikeComment(withID: commentID, siteID: siteID, success: {
+            DDLogInfo("Successfully unliked comment \(siteID).\(commentID)")
+            self.invalidateCacheAndForceSyncNotification(with: block)
             completion?(true)
+
         }, failure: { error in
-            DDLogSwift.logError("Error while trying to unlike comment: \(error)")
+            DDLogError("Error while trying to unlike comment: \(String(describing: error))")
             block.removeOverrideValueForAction(.Like)
             completion?(false)
         })
@@ -160,17 +172,19 @@ public class NotificationActionsService: LocalCoreDataService
     /// - Parameter block: The Notification's Comment Block
     /// - Parameter completion: Closure block to be executed on completion, indicating if we've succeeded or not.
     ///
-    func approveCommentWithBlock(block: NotificationBlock, completion: (Bool -> Void)? = nil) {
-        guard let commentID = block.metaCommentID, siteID = block.metaSiteID else {
+    func approveCommentWithBlock(_ block: NotificationBlock, completion: ((Bool) -> Void)? = nil) {
+        guard let commentID = block.metaCommentID, let siteID = block.metaSiteID else {
             completion?(false)
             return
         }
 
-        commentService.approveCommentWithID(commentID, siteID: siteID, success: {
-            DDLogSwift.logInfo("Successfully approved comment \(siteID).\(commentID)")
+        commentService.approveComment(withID: commentID, siteID: siteID, success: {
+            DDLogInfo("Successfully approved comment \(siteID).\(commentID)")
+            self.invalidateCacheAndForceSyncNotification(with: block)
             completion?(true)
+
         }, failure: { error in
-            DDLogSwift.logError("Error while trying to moderate comment: \(error)")
+            DDLogError("Error while trying to moderate comment: \(String(describing: error))")
             block.removeOverrideValueForAction(.Approve)
             completion?(false)
         })
@@ -184,17 +198,19 @@ public class NotificationActionsService: LocalCoreDataService
     /// - Parameter block: The Notification's Comment Block
     /// - Parameter completion: Closure block to be executed on completion, indicating if we've succeeded or not.
     ///
-    func unapproveCommentWithBlock(block: NotificationBlock, completion: (Bool -> Void)? = nil) {
-        guard let commentID = block.metaCommentID, siteID = block.metaSiteID else {
+    func unapproveCommentWithBlock(_ block: NotificationBlock, completion: ((Bool) -> Void)? = nil) {
+        guard let commentID = block.metaCommentID, let siteID = block.metaSiteID else {
             completion?(false)
             return
         }
 
-        commentService.unapproveCommentWithID(commentID, siteID: siteID, success: {
-            DDLogSwift.logInfo("Successfully unapproved comment \(siteID).\(commentID)")
+        commentService.unapproveComment(withID: commentID, siteID: siteID, success: {
+            DDLogInfo("Successfully unapproved comment \(siteID).\(commentID)")
+            self.invalidateCacheAndForceSyncNotification(with: block)
             completion?(true)
+
         }, failure: { error in
-            DDLogSwift.logError("Error while trying to moderate comment: \(error)")
+            DDLogError("Error while trying to moderate comment: \(String(describing: error))")
             block.removeOverrideValueForAction(.Approve)
             completion?(false)
         })
@@ -208,17 +224,19 @@ public class NotificationActionsService: LocalCoreDataService
     /// - Parameter block: The Notification's Comment Block
     /// - Parameter completion: Closure block to be executed on completion, indicating if we've succeeded or not.
     ///
-    func spamCommentWithBlock(block: NotificationBlock, completion: (Bool -> Void)? = nil) {
-        guard let commentID = block.metaCommentID, siteID = block.metaSiteID else {
+    func spamCommentWithBlock(_ block: NotificationBlock, completion: ((Bool) -> Void)? = nil) {
+        guard let commentID = block.metaCommentID, let siteID = block.metaSiteID else {
             completion?(false)
             return
         }
 
-        commentService.spamCommentWithID(commentID, siteID: siteID, success: {
-            DDLogSwift.logInfo("Successfully spammed comment \(siteID).\(commentID)")
+        commentService.spamComment(withID: commentID, siteID: siteID, success: {
+            DDLogInfo("Successfully spammed comment \(siteID).\(commentID)")
+            self.invalidateCacheAndForceSyncNotification(with: block)
             completion?(true)
+
         }, failure: { error in
-            DDLogSwift.logError("Error while trying to mark comment as spam: \(error)")
+            DDLogError("Error while trying to mark comment as spam: \(String(describing: error))")
             completion?(false)
         })
     }
@@ -229,30 +247,60 @@ public class NotificationActionsService: LocalCoreDataService
     /// - Parameter block: The Notification's Comment Block
     /// - Parameter completion: Closure block to be executed on completion, indicating if we've succeeded or not.
     ///
-    func deleteCommentWithBlock(block: NotificationBlock, completion: (Bool -> Void)? = nil) {
-        guard let commentID = block.metaCommentID, siteID = block.metaSiteID else {
+    func deleteCommentWithBlock(_ block: NotificationBlock, completion: ((Bool) -> Void)? = nil) {
+        guard let commentID = block.metaCommentID, let siteID = block.metaSiteID else {
             completion?(false)
             return
         }
 
-        commentService.deleteCommentWithID(commentID, siteID: siteID, success: {
-            DDLogSwift.logInfo("Successfully deleted comment \(siteID).\(commentID)")
+        commentService.deleteComment(withID: commentID, siteID: siteID, success: {
+            DDLogInfo("Successfully deleted comment \(siteID).\(commentID)")
+            self.invalidateCacheAndForceSyncNotification(with: block)
             completion?(true)
+
         }, failure: { error in
-            DDLogSwift.logError("Error while trying to delete comment: \(error)")
+            DDLogError("Error while trying to delete comment: \(String(describing: error))")
             completion?(false)
         })
     }
+}
 
 
 
-    // MARK: - Private Helpers
+// MARK: - Private Helpers
+//
+private extension NotificationActionsService {
 
-    private var commentService: CommentService {
+    /// Invalidates the Local Cache for a given Notification, and re-downloaded from the remote endpoint.
+    /// We're doing *both actions* so that in the eventual case of "Broken REST Request", the notification's hash won't match
+    /// with the remote value, and the note will be redownloaded upon Sync.
+    ///
+    /// Required due to a beautiful backend bug. Details here: https://github.com/wordpress-mobile/WordPress-iOS/pull/6871
+    ///
+    /// - Parameter block: child NotificationBlock object of the Notification-to-be-refreshed.
+    ///
+    func invalidateCacheAndForceSyncNotification(with block: NotificationBlock) {
+        guard let notificationID = block.notificationID, let mediator = NotificationSyncMediator() else {
+            return
+        }
+
+        DDLogInfo("Invalidating Cache and Force Sync'ing Notification with ID: \(notificationID)")
+        mediator.invalidateCacheForNotification(with: notificationID)
+        mediator.syncNote(with: notificationID)
+    }
+}
+
+
+
+// MARK: - Computed Properties
+//
+private extension NotificationActionsService {
+
+    var commentService: CommentService {
         return CommentService(managedObjectContext: managedObjectContext)
     }
 
-    private var siteService: ReaderSiteService {
+    var siteService: ReaderSiteService {
         return ReaderSiteService(managedObjectContext: managedObjectContext)
     }
 }

@@ -1,19 +1,14 @@
 #import "PostService.h"
 #import "Coordinate.h"
 #import "PostCategory.h"
-#import "PostServiceRemote.h"
-#import "PostServiceRemoteREST.h"
-#import "PostServiceRemoteXMLRPC.h"
-#import "RemotePost.h"
-#import "RemotePostCategory.h"
 #import "PostCategoryService.h"
 #import "ContextManager.h"
-#import "NSDate+WordPressJSON.h"
 #import "CommentService.h"
 #import "MediaService.h"
 #import "Media.h"
-#import "DisplayableImageHelper.h"
 #import "WordPress-Swift.h"
+@import WordPressKit;
+@import WordPressShared;
 
 PostServiceType const PostServiceTypePost = @"post";
 PostServiceType const PostServiceTypePage = @"page";
@@ -56,6 +51,7 @@ const NSUInteger PostServiceDefaultNumberToSync = 40;
     NSAssert(self.managedObjectContext == blog.managedObjectContext, @"Blog's context should be the the same as the service's");
     Page *page = [NSEntityDescription insertNewObjectForEntityForName:NSStringFromClass([Page class]) inManagedObjectContext:self.managedObjectContext];
     page.blog = blog;
+    page.date_created_gmt = [NSDate date];
     page.remoteStatus = AbstractPostRemoteStatusSync;
     return page;
 }
@@ -185,9 +181,12 @@ const NSUInteger PostServiceDefaultNumberToSync = 40;
 
                 NSPredicate *unattachedMediaPredicate = [NSPredicate predicateWithFormat:@"postID <= 0"];
                 NSArray<Media *> *mediaToUpdate = [[postInContext.media filteredSetUsingPredicate:unattachedMediaPredicate] allObjects];
+                for (Media *media in mediaToUpdate) {
+                    media.postID = post.postID;
+                }
 
                 MediaService *mediaService = [[MediaService alloc] initWithManagedObjectContext:self.managedObjectContext];
-                [mediaService updateMultipleMedia:mediaToUpdate overallSuccess:^{
+                [mediaService updateMedia:mediaToUpdate overallSuccess:^{
                     [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
 
                     if (success) {
@@ -207,6 +206,11 @@ const NSUInteger PostServiceDefaultNumberToSync = 40;
             Post *postInContext = (Post *)[self.managedObjectContext existingObjectWithID:postObjectID error:nil];
             if (postInContext) {
                 postInContext.remoteStatus = AbstractPostRemoteStatusFailed;
+                // If the post was not created on the server yet we convert the post to a local draft post with the current date.
+                if (!postInContext.hasRemote) {
+                    postInContext.status = PostStatusDraft;
+                    postInContext.dateModified = [NSDate date];
+                }
                 [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
             }
             if (failure) {
@@ -415,6 +419,7 @@ const NSUInteger PostServiceDefaultNumberToSync = 40;
 
 - (void)initializeDraft:(AbstractPost *)post {
     post.remoteStatus = AbstractPostRemoteStatusLocal;
+    post.dateModified = [NSDate date];
 }
 
 - (void)mergePosts:(NSArray <RemotePost *> *)remotePosts
@@ -519,17 +524,23 @@ const NSUInteger PostServiceDefaultNumberToSync = 40;
     post.post_thumbnail = remotePost.postThumbnailID;
     post.pathForDisplayImage = remotePost.pathForDisplayImage;
     if (post.pathForDisplayImage.length == 0) {
-        // Let's see if some galleries are available
-        NSSet *mediaIDs = [DisplayableImageHelper searchPostContentForAttachmentIdsInGalleries:post.content];
-        for (Media *media in post.blog.media) {
-            NSNumber *mediaID = media.mediaID;
-            if (mediaID && [mediaIDs containsObject:mediaID]) {
-                post.pathForDisplayImage = media.remoteURL;
+        // First lets check the post content for a suitable image
+        post.pathForDisplayImage = [DisplayableImageHelper searchPostContentForImageToDisplay:post.content];
+        if (post.pathForDisplayImage.length == 0) {
+            // If none found let's see if some galleries are available
+            NSSet *mediaIDs = [DisplayableImageHelper searchPostContentForAttachmentIdsInGalleries:post.content];
+            for (Media *media in post.blog.media) {
+                NSNumber *mediaID = media.mediaID;
+                if (mediaID && [mediaIDs containsObject:mediaID]) {
+                    post.pathForDisplayImage = media.remoteURL;
+                }
             }
         }
     }
     post.authorAvatarURL = remotePost.authorAvatarURL;
     post.mt_excerpt = remotePost.excerpt;
+    post.wp_slug = remotePost.slug;
+    post.suggested_slug = remotePost.suggestedSlug;
 
     if (remotePost.postID != previousPostID) {
         [self updateCommentsForPost:post];
@@ -551,6 +562,9 @@ const NSUInteger PostServiceDefaultNumberToSync = 40;
         NSString *latitudeID = nil;
         NSString *longitudeID = nil;
         NSString *publicID = nil;
+        NSString *publicizeMessage = nil;
+        NSString *publicizeMessageID = nil;
+        NSMutableDictionary *disabledPublicizeConnections = [NSMutableDictionary dictionary];
         if (remotePost.metadata) {
             NSDictionary *latitudeDictionary = [self dictionaryWithKey:@"geo_latitude" inMetadata:remotePost.metadata];
             NSDictionary *longitudeDictionary = [self dictionaryWithKey:@"geo_longitude" inMetadata:remotePost.metadata];
@@ -566,11 +580,29 @@ const NSUInteger PostServiceDefaultNumberToSync = 40;
                 longitudeID = [longitudeDictionary stringForKey:@"id"];
                 publicID = [geoPublicDictionary stringForKey:@"id"];
             }
+            NSDictionary *publicizeMessageDictionary = [self dictionaryWithKey:@"_wpas_mess" inMetadata:remotePost.metadata];
+            publicizeMessage = [publicizeMessageDictionary stringForKey:@"value"];
+            publicizeMessageID = [publicizeMessageDictionary stringForKey:@"id"];
+
+            NSArray *disabledPublicizeConnectionsArray = [self entriesWithKeyLike:@"_wpas_skip_*" inMetadata:remotePost.metadata];
+            for (NSDictionary *disabledConnectionDictionary in disabledPublicizeConnectionsArray) {
+                NSString *dictKey = [disabledConnectionDictionary stringForKey:@"key"];
+                // We only want to keep the keyringID value from the key
+                NSNumber *keyringConnectionID = @([[dictKey stringByReplacingOccurrencesOfString:@"_wpas_skip_"
+                                                                                      withString:@""]integerValue]);
+                NSMutableDictionary *keyringConnectionData = [NSMutableDictionary dictionaryWithCapacity:2];
+                keyringConnectionData[@"id"] = [disabledConnectionDictionary stringForKey:@"id"];
+                keyringConnectionData[@"value"] = [disabledConnectionDictionary stringForKey:@"value"];
+                disabledPublicizeConnections[keyringConnectionID] = keyringConnectionData;
+            }
         }
         postPost.geolocation = geolocation;
         postPost.latitudeID = latitudeID;
         postPost.longitudeID = longitudeID;
         postPost.publicID = publicID;
+        postPost.publicizeMessage = publicizeMessage;
+        postPost.publicizeMessageID = publicizeMessageID;
+        postPost.disabledPublicizeConnections = disabledPublicizeConnections;
     }
 }
 
@@ -587,6 +619,8 @@ const NSUInteger PostServiceDefaultNumberToSync = 40;
     remotePost.password = post.password;
     remotePost.type = @"post";
     remotePost.authorAvatarURL = post.authorAvatarURL;
+    remotePost.excerpt = post.mt_excerpt;
+    remotePost.slug = post.wp_slug;
 
     if ([post isKindOfClass:[Page class]]) {
         Page *pagePost = (Page *)post;
@@ -668,6 +702,23 @@ const NSUInteger PostServiceDefaultNumberToSync = 40;
         }
         [metadata addObject:publicDictionary];
     }
+    if (post.publicizeMessageID || post.publicizeMessage.length) {
+        NSMutableDictionary *publicizeMessageDictionary = [NSMutableDictionary dictionaryWithCapacity:3];
+        if (post.publicizeMessageID) {
+            publicizeMessageDictionary[@"id"] = post.publicizeMessageID;
+        }
+        publicizeMessageDictionary[@"key"] = @"_wpas_mess";
+        publicizeMessageDictionary[@"value"] = post.publicizeMessage.length ? post.publicizeMessage : @"";
+        [metadata addObject:publicizeMessageDictionary];
+    }
+    for (NSNumber *keyringConnectionId in post.disabledPublicizeConnections.allKeys) {
+        NSMutableDictionary *disabledConnectionsDictionary = [NSMutableDictionary dictionaryWithCapacity: 3];
+        // We need to compose back the key
+        disabledConnectionsDictionary[@"key"] = [NSString stringWithFormat:@"_wpas_skip_%@",
+                                                                           keyringConnectionId];
+        [disabledConnectionsDictionary addEntriesFromDictionary:post.disabledPublicizeConnections[keyringConnectionId]];
+        [metadata addObject:disabledConnectionsDictionary];
+    }
     return metadata;
 }
 
@@ -701,6 +752,11 @@ const NSUInteger PostServiceDefaultNumberToSync = 40;
     // In theory, there shouldn't be duplicated fields, but I've seen some bugs where there's more than one geo_* value
     // In any case, they should be sorted by id, so `lastObject` should have the newer value
     return [matchingEntries lastObject];
+}
+
+- (NSArray *)entriesWithKeyLike:(NSString *)key inMetadata:(NSArray *)metadata
+{
+    return [metadata filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"key like %@", key]];
 }
 
 - (id<PostServiceRemote>)remoteForBlog:(Blog *)blog {

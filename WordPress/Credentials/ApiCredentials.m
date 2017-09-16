@@ -13,10 +13,6 @@
     return WPCOM_API_CLIENT_SECRET;
 }
 
-+ (NSString *)mixpanelAPIToken {
-    return @"";
-}
-
 + (NSString *)pocketConsumerKey {
     return @"";
 }
@@ -43,14 +39,6 @@
 
 + (NSString *)helpshiftAppId {
     return @"";
-}
-
-+ (NSString *)lookbackToken {
-   return @"";
-}
-
-+ (NSString *)appbotXAPIKey {
-   return @"";
 }
 
 @end

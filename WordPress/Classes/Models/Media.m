@@ -1,4 +1,6 @@
 #import "Media.h"
+#import "ContextManager.h"
+#import "WordPress-Swift.h"
 
 @implementation Media
 
@@ -12,7 +14,6 @@
 @dynamic height;
 @dynamic filename;
 @dynamic filesize;
-@dynamic orientation;
 @dynamic creationDate;
 @dynamic blog;
 @dynamic posts;
@@ -21,59 +22,12 @@
 @dynamic desc;
 @dynamic mediaTypeString;
 @dynamic videopressGUID;
+@dynamic localThumbnailIdentifier;
 @dynamic localThumbnailURL;
 @dynamic remoteThumbnailURL;
 @dynamic postID;
 
-@synthesize unattached;
-
-- (void)mediaTypeFromUrl:(NSString *)ext
-{
-    CFStringRef fileExt = (__bridge CFStringRef)ext;
-    CFStringRef fileUTI = UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, fileExt, nil);
-    CFStringRef ppt = (__bridge CFStringRef)@"public.presentation";
-
-    if (UTTypeConformsTo(fileUTI, kUTTypeImage)) {
-        self.mediaTypeString = @"image";
-    } else if (UTTypeConformsTo(fileUTI, kUTTypeVideo)) {
-        self.mediaTypeString = @"video";
-    } else if (UTTypeConformsTo(fileUTI, kUTTypeMovie)) {
-        self.mediaTypeString = @"video";
-    } else if (UTTypeConformsTo(fileUTI, kUTTypeMPEG4)) {
-        self.mediaTypeString = @"video";
-    } else if (UTTypeConformsTo(fileUTI, ppt)) {
-        self.mediaTypeString = @"powerpoint";
-    } else {
-        self.mediaTypeString = @"document";
-    }
-
-    if (fileUTI) {
-        CFRelease(fileUTI);
-        fileUTI = nil;
-    }
-}
-
-- (MediaType)mediaType
-{
-    if ([self.mediaTypeString isEqualToString:@"image"]) {
-        return MediaTypeImage;
-    } else if ([self.mediaTypeString isEqualToString:@"video"]) {
-        return MediaTypeVideo;
-    } else if ([self.mediaTypeString isEqualToString:@"powerpoint"]) {
-        return MediaTypePowerpoint;
-    } else if ([self.mediaTypeString isEqualToString:@"document"]) {
-        return MediaTypeDocument;
-    } else if ([self.mediaTypeString isEqualToString:@"featured"]) {
-        // this is for object that where still storing the old value.
-        return MediaTypeImage;
-    }
-    return MediaTypeDocument;
-}
-
-- (void)setMediaType:(MediaType)mediaType
-{
-    self.mediaTypeString = [[self class] stringFromMediaType:mediaType];    
-}
+#pragma mark -
 
 + (NSString *)stringFromMediaType:(MediaType)mediaType
 {
@@ -90,21 +44,110 @@
         case MediaTypeDocument:
             return @"document";
             break;
+        case MediaTypeAudio:
+            return @"audio";
+            break;
     }
 }
-
-- (BOOL)featured
-{
-    for (AbstractPost *post in self.posts) {
-        if ([post.post_thumbnail isEqualToNumber:self.mediaID]){
-            return YES;
-        }
-    }
-    return NO;
-}
-
 
 #pragma mark -
+
+- (NSString *)fileExtension
+{
+    NSString *extension = [self.filename pathExtension];
+    if (extension.length) {
+        return extension;
+    }
+    extension = [self.localURL pathExtension];
+    if (extension.length) {
+        return extension;
+    }
+    extension = [self.remoteURL pathExtension];
+    return extension;
+}
+
+- (NSString *)mimeType
+{
+    NSString *unknown = @"application/octet-stream";
+    NSString *extension = [self fileExtension];
+    if (!extension.length) {
+        return unknown;
+    }
+    NSString *fileUTI = (__bridge_transfer NSString *)UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, (__bridge CFStringRef)extension, NULL);
+    NSString *mimeType = (__bridge_transfer NSString *)UTTypeCopyPreferredTagWithClass((__bridge CFStringRef)fileUTI, kUTTagClassMIMEType);
+    if (!mimeType) {
+        return unknown;
+    } else {
+        return mimeType;
+    }
+}
+
+#pragma mark - Media Types
+
+- (MediaType)mediaType
+{
+    if ([self.mediaTypeString isEqualToString:[Media stringFromMediaType:MediaTypeImage]]) {
+        return MediaTypeImage;
+    } else if ([self.mediaTypeString isEqualToString:[Media stringFromMediaType:MediaTypeVideo]]) {
+        return MediaTypeVideo;
+    } else if ([self.mediaTypeString isEqualToString:[Media stringFromMediaType:MediaTypePowerpoint]]) {
+        return MediaTypePowerpoint;
+    } else if ([self.mediaTypeString isEqualToString:[Media stringFromMediaType:MediaTypeDocument]]) {
+        return MediaTypeDocument;
+    } else if ([self.mediaTypeString isEqualToString:[Media stringFromMediaType:MediaTypeAudio]]) {
+        return MediaTypeAudio;
+    }
+
+    return MediaTypeDocument;
+}
+
+- (void)setMediaType:(MediaType)mediaType
+{
+    self.mediaTypeString = [[self class] stringFromMediaType:mediaType];    
+}
+
+- (void)setMediaTypeForExtension:(NSString *)extension
+{
+    CFStringRef fileExt = (__bridge CFStringRef)extension;
+    CFStringRef fileUTI = UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, fileExt, nil);
+    [self setMediaTypeForUTI:CFBridgingRelease(fileUTI)];
+}
+
+- (void)setMediaTypeForMimeType:(NSString *)mimeType
+{
+    NSString *filteredMimeType = mimeType;
+    if ( [filteredMimeType isEqual:@"video/videopress"]) {
+        filteredMimeType = @"video/mp4";
+    }
+    CFStringRef fileType = (__bridge CFStringRef)filteredMimeType;
+    CFStringRef fileUTI = UTTypeCreatePreferredIdentifierForTag(kUTTagClassMIMEType, fileType, nil);
+    [self setMediaTypeForUTI:CFBridgingRelease(fileUTI)];
+}
+
+
+- (void)setMediaTypeForUTI:(NSString *)uti
+{
+    CFStringRef fileUTI = (__bridge CFStringRef _Nonnull)(uti);
+    MediaType type;
+    if (UTTypeConformsTo(fileUTI, kUTTypeImage)) {
+        type = MediaTypeImage;
+    } else if (UTTypeConformsTo(fileUTI, kUTTypeVideo)) {
+        type = MediaTypeVideo;
+    } else if (UTTypeConformsTo(fileUTI, kUTTypeMovie)) {
+        type = MediaTypeVideo;
+    } else if (UTTypeConformsTo(fileUTI, kUTTypeMPEG4)) {
+        type = MediaTypeVideo;
+    } else if (UTTypeConformsTo(fileUTI, kUTTypePresentation)) {
+        type = MediaTypePowerpoint;
+    } else if (UTTypeConformsTo(fileUTI, kUTTypeAudio)) {
+        type = MediaTypeAudio;
+    } else {
+        type = MediaTypeDocument;
+    }    
+    self.mediaType = type;
+}
+
+#pragma mark - Remote Status
 
 - (MediaRemoteStatus)remoteStatus
 {
@@ -116,9 +159,9 @@
     [self setRemoteStatusNumber:[NSNumber numberWithInt:aStatus]];
 }
 
-+ (NSString *)titleForRemoteStatus:(NSNumber *)remoteStatus
+- (NSString *)remoteStatusText
 {
-    switch ([remoteStatus intValue]) {
+    switch ([self.remoteStatusNumber intValue]) {
         case MediaRemoteStatusPushing:
             return NSLocalizedString(@"Uploading", @"");
         case MediaRemoteStatusFailed:
@@ -130,21 +173,64 @@
     }
 }
 
-- (NSString *)remoteStatusText
+#pragma mark - Absolute URLs
+
+- (NSURL *)absoluteThumbnailLocalURL;
 {
-    return [Media titleForRemoteStatus:self.remoteStatusNumber];
+    if (!self.localThumbnailURL.length) {
+        return nil;
+    }
+    return [self absoluteURLForLocalPath:self.localThumbnailURL cacheDirectory:YES];
 }
+
+- (void)setAbsoluteThumbnailLocalURL:(NSURL *)absoluteLocalURL
+{
+    self.localThumbnailURL = absoluteLocalURL.lastPathComponent;
+}
+
+- (NSURL *)absoluteLocalURL
+{
+    if (!self.localURL.length) {
+        return nil;
+    }
+    return [self absoluteURLForLocalPath:self.localURL cacheDirectory:NO];
+}
+
+- (void)setAbsoluteLocalURL:(NSURL *)absoluteLocalURL
+{
+    self.localURL = absoluteLocalURL.lastPathComponent;
+}
+
+- (NSURL *)absoluteURLForLocalPath:(NSString *)localPath cacheDirectory:(BOOL)cacheDirectory
+{
+    NSError *error;
+    NSURL *mediaDirectory = nil;
+    if (cacheDirectory) {
+        mediaDirectory = [[MediaFileManager cacheManager] directoryURLAndReturnError:&error];
+    } else {
+        mediaDirectory = [MediaFileManager uploadsDirectoryURLAndReturnError:&error];
+    }
+    if (error) {
+        DDLogInfo(@"Error resolving Media directory: %@", error);
+        return nil;
+    }
+    return [mediaDirectory URLByAppendingPathComponent:localPath.lastPathComponent];
+}
+
+#pragma mark - CoreData Helpers
 
 - (void)prepareForDeletion
 {
     NSError *error = nil;
     NSFileManager *fileManager = [NSFileManager defaultManager];
-    if ([fileManager fileExistsAtPath:self.absoluteLocalURL] &&
-        ![fileManager removeItemAtPath:self.absoluteLocalURL error:&error]) {
+    NSString *absolutePath = self.absoluteLocalURL.path;
+    if ([fileManager fileExistsAtPath:absolutePath] &&
+        ![fileManager removeItemAtPath:absolutePath error:&error]) {
         DDLogInfo(@"Error removing media files:%@", error);
     }
-    if ([fileManager fileExistsAtPath:self.absoluteThumbnailLocalURL] &&
-        ![fileManager removeItemAtPath:self.absoluteThumbnailLocalURL error:&error]) {
+    NSString *absoluteThumbnailPath = self.absoluteThumbnailLocalURL.path;
+    if ([fileManager fileExistsAtPath:absoluteThumbnailPath] &&
+        ![fileManager removeItemAtPath:absoluteThumbnailPath error:&error]) {
         DDLogInfo(@"Error removing media files:%@", error);
     }
     [super prepareForDeletion];
@@ -154,136 +240,17 @@
 {
     [self.managedObjectContext performBlockAndWait:^{
         [self.managedObjectContext deleteObject:self];
-        [self.managedObjectContext save:nil];
+        [[ContextManager sharedInstance] saveContextAndWait:self.managedObjectContext];
     }];
 }
 
 - (void)save
 {
-    [self.managedObjectContext performBlock:^{
-        [self.managedObjectContext save:nil];
-    }];
+    [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
 }
 
-- (BOOL)unattached
-{
-    return self.posts.count == 0;
-}
-
-- (NSString *)html
-{
-    NSString *result = @"";
-    if (self.mediaType == MediaTypeImage) {
-        if (self.shortcode != nil) {
-            result = self.shortcode;
-        } else if (self.remoteURL != nil) {
-            NSString *linkType = nil;
-            if ( [[self.blog getOptionValue:@"image_default_link_type"] isKindOfClass:[NSString class]] ) {
-                linkType = (NSString *)[self.blog getOptionValue:@"image_default_link_type"];
-            } else {
-                linkType = @"";
-            }
-
-            if ([linkType isEqualToString:@"none"]) {
-                result = [NSString stringWithFormat:
-                          @"<img src=\"%@\" alt=\"%@\" class=\"alignnone size-full\" />",
-                          self.remoteURL, self.title];
-            } else {
-                result = [NSString stringWithFormat:
-                          @"<a href=\"%@\"><img src=\"%@\" alt=\"%@\" class=\"alignnone size-full\" /></a>",
-                          self.remoteURL, self.remoteURL, self.title];
-            }
-        }
-    } else if (self.mediaType == MediaTypeVideo) {
-        NSString *embedWidth = [NSString stringWithFormat:@"%@", self.width];
-        NSString *embedHeight= [NSString stringWithFormat:@"%@", self.height];
-
-        // Check for landscape resize
-        if (([self.width intValue] > [self.height intValue]) && ([self.width intValue] > 640)) {
-            embedWidth = @"640";
-            embedHeight = @"360";
-        } else if (([self.height intValue] > [self.width intValue]) && ([self.height intValue] > 640)) {
-            embedHeight = @"640";
-            embedWidth = @"360";
-        }
-
-        if (self.shortcode != nil) {
-            result = self.shortcode;
-        } else if (self.videopressGUID.length > 0) {
-            result = [NSString stringWithFormat:
-                      @"[wpvideo %@]",
-                      self.videopressGUID];
-        } else if (self.remoteURL != nil) {
-            // Use HTML 5 <video> tag
-            result = [NSString stringWithFormat:
-                      @"<video src=\"%@\" controls=\"controls\" width=\"%@\" height=\"%@\">"
-                      "Your browser does not support the video tag"
-                      "</video>",
-                      self.remoteURL,
-                      embedWidth,
-                      embedHeight];
-
-            DDLogVerbose(@"media.html: %@", result);
-        }
-    }
-    return result;
-}
-
-- (NSString *)absoluteThumbnailLocalURL;
-{
-    if ( self.localThumbnailURL ) {
-        NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-        NSString *documentsDirectory = [paths firstObject];
-        NSString *absolutePath = [NSString pathWithComponents:@[documentsDirectory, self.localThumbnailURL]];
-        return absolutePath;
-    } else {
-        return nil;
-    }
-}
-
-- (void)setAbsoluteThumbnailLocalURL:(NSString *)absoluteLocalURL
-{
-    NSParameterAssert([absoluteLocalURL isAbsolutePath]);
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *documentsDirectory = [paths firstObject];
-    NSString *localPath =  [absoluteLocalURL stringByReplacingOccurrencesOfString:documentsDirectory withString:@""];
-    self.localThumbnailURL = localPath;
-}
-
-- (NSString *)absoluteLocalURL
-{
-    if ( self.localURL ) {
-        NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-        NSString *documentsDirectory = [paths firstObject];
-        NSString *absolutePath = [NSString pathWithComponents:@[documentsDirectory, self.localURL]];
-        return absolutePath;
-    } else {
-        return nil;
-    }
-}
-
-- (void)setAbsoluteLocalURL:(NSString *)absoluteLocalURL
-{
-    NSParameterAssert([absoluteLocalURL isAbsolutePath]);
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *documentsDirectory = [paths firstObject];
-    NSString *localPath =  [absoluteLocalURL stringByReplacingOccurrencesOfString:documentsDirectory withString:@""];
-    self.localURL = localPath;
-}
-
-- (NSString *)posterImageURL
-{
-    if (!self.videopressGUID) {
-        return self.remoteThumbnailURL;
-    }
-
-    NSString *posterURL = [self absoluteThumbnailLocalURL];
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if ([fileManager fileExistsAtPath:posterURL isDirectory:nil]) {
-        return posterURL;
-    }
-    posterURL = self.remoteThumbnailURL;
-    return posterURL;
+- (BOOL)hasRemote {
+    return self.mediaID.intValue != 0;
 }
 
 @end

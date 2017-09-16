@@ -2,28 +2,27 @@ import Foundation
 import WordPressShared
 
 
-class NoteBlockUserTableViewCell: NoteBlockTableViewCell
-{
+class NoteBlockUserTableViewCell: NoteBlockTableViewCell {
     typealias EventHandler = (() -> Void)
 
     // MARK: - Public Properties
-    var onFollowClick    : EventHandler?
-    var onUnfollowClick  : EventHandler?
+    var onFollowClick: EventHandler?
+    var onUnfollowClick: EventHandler?
 
     var isFollowEnabled: Bool {
         set {
-            btnFollow.hidden = !newValue
+            btnFollow.isHidden = !newValue
         }
         get {
-            return !btnFollow.hidden
+            return !btnFollow.isHidden
         }
     }
     var isFollowOn: Bool {
         set {
-            btnFollow.selected = newValue
+            btnFollow.isSelected = newValue
         }
         get {
-            return btnFollow.selected
+            return btnFollow.isSelected
         }
     }
 
@@ -45,7 +44,7 @@ class NoteBlockUserTableViewCell: NoteBlockTableViewCell
     }
 
     // MARK: - Public Methods
-    func downloadGravatarWithURL(url: NSURL?) {
+    func downloadGravatarWithURL(_ url: URL?) {
         if url == gravatarURL {
             return
         }
@@ -61,12 +60,10 @@ class NoteBlockUserTableViewCell: NoteBlockTableViewCell
     override func awakeFromNib() {
         super.awakeFromNib()
 
-        WPStyleGuide.configureFollowButton(btnFollow)
+        WPStyleGuide.configureFollow(btnFollow)
         btnFollow.titleLabel?.font = WPStyleGuide.Notifications.blockRegularFont
 
         backgroundColor = WPStyleGuide.Notifications.blockBackgroundColor
-        accessoryType = .None
-        contentView.autoresizingMask = [.FlexibleHeight, .FlexibleWidth]
 
         nameLabel.font = WPStyleGuide.Notifications.blockBoldFont
         nameLabel.textColor = WPStyleGuide.Notifications.blockTextColor
@@ -77,20 +74,21 @@ class NoteBlockUserTableViewCell: NoteBlockTableViewCell
     }
 
     // MARK: - IBActions
-    @IBAction func followWasPressed(sender: AnyObject) {
-        if let listener = isFollowOn ? onUnfollowClick : onFollowClick {
-            listener()
+    @IBAction func followWasPressed(_ sender: AnyObject) {
+        ReachabilityUtils.onAvailableInternetConnectionDo {
+            if let listener = isFollowOn ? onUnfollowClick : onFollowClick {
+                listener()
+            }
+            isFollowOn = !isFollowOn
         }
-        isFollowOn = !isFollowOn
     }
 
     // MARK: - Private
-    private let gravatarImageSizePad = CGSize(width: 54.0, height: 54.0)
-    private var gravatarURL: NSURL?
+    fileprivate var gravatarURL: URL?
 
     // MARK: - IBOutlets
-    @IBOutlet private weak var nameLabel: UILabel!
-    @IBOutlet private weak var blogLabel: UILabel!
-    @IBOutlet private weak var btnFollow: UIButton!
-    @IBOutlet private weak var gravatarImageView: CircularImageView!
+    @IBOutlet fileprivate weak var nameLabel: UILabel!
+    @IBOutlet fileprivate weak var blogLabel: UILabel!
+    @IBOutlet fileprivate weak var btnFollow: UIButton!
+    @IBOutlet fileprivate weak var gravatarImageView: CircularImageView!
 }

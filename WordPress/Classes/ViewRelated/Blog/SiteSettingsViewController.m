@@ -13,12 +13,11 @@
 #import "SettingsMultiTextViewController.h"
 #import "SettingTableViewCell.h"
 #import "SettingsTextViewController.h"
+#import "SVProgressHUD+Dismiss.h"
 #import "WordPress-Swift.h"
 #import "WPWebViewController.h"
-#import "WordPress-Swift.h"
-#import "BlogServiceRemoteXMLRPC.h"
-#import <SVProgressHUD/SVProgressHUD.h>
-#import <WPXMLRPC/WPXMLRPC.h>
+#import <wpxmlrpc/WPXMLRPC.h>
+@import WordPressKit;
 
 
 NS_ENUM(NSInteger, SiteSettingsGeneral) {
@@ -55,10 +54,11 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
     SiteSettingsSectionAccount,
     SiteSettingsSectionWriting,
     SiteSettingsSectionDiscussion,
-    SiteSettingsSectionRemoveSite,
+    SiteSettingsSectionJetpackSettings,
     SiteSettingsSectionAdvanced,
 };
 
+static NSString *const EmptySiteSupportURL = @"https://en.support.wordpress.com/empty-site/";
 
 @interface SiteSettingsViewController () <UITableViewDelegate, UITextFieldDelegate, PostCategoriesViewControllerDelegate>
 
@@ -77,10 +77,10 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
 @property (nonatomic, strong) SettingTableViewCell *relatedPostsCell;
 #pragma mark - Discussion Section
 @property (nonatomic, strong) SettingTableViewCell *discussionSettingsCell;
+#pragma mark - Jetpack Settings Section
+@property (nonatomic, strong) SettingTableViewCell *jetpackSecurityCell;
 #pragma mark - Device Section
 @property (nonatomic, strong) SwitchTableViewCell *geotaggingCell;
-#pragma mark - Removal Section
-@property (nonatomic, strong) UITableViewCell *removeSiteCell;
 #pragma mark - Advanced Section
 @property (nonatomic, strong) SettingTableViewCell *startOverCell;
 @property (nonatomic, strong) WPTableViewCell *exportContentCell;
@@ -107,6 +107,7 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
         _blog = blog;
         _username = blog.usernameForSite;
         _password = blog.password;
+        [WPStyleGuide configureAutomaticHeightRowsFor:self.tableView];
     }
     return self;
 }
@@ -151,14 +152,10 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
 
     if ([self.blog supports:BlogFeatureWPComRESTAPI] && self.blog.isAdmin) {
         [sections addObject:@(SiteSettingsSectionWriting)];
-    }
-
-    if ([self.blog supports:BlogFeatureWPComRESTAPI]) {
         [sections addObject:@(SiteSettingsSectionDiscussion)];
-    }
-
-    if ([self.blog supports:BlogFeatureRemovable]) {
-        [sections addObject:@(SiteSettingsSectionRemoveSite)];
+        if ([self.blog supports:BlogFeatureJetpackSettings]) {
+            [sections addObject:@(SiteSettingsSectionJetpackSettings)];
+        }
     }
 
     if ([self.blog supports:BlogFeatureSiteManagement]) {
@@ -208,7 +205,7 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
         {
             return 1;
         }
-        case SiteSettingsSectionRemoveSite:
+        case SiteSettingsSectionJetpackSettings:
         {
             return 1;
         }
@@ -311,16 +308,15 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
     return _discussionSettingsCell;
 }
 
-- (UITableViewCell *)removeSiteCell
+- (SettingTableViewCell *)jetpackSecurityCell
 {
-    if (_removeSiteCell) {
-        return _removeSiteCell;
+    if (_jetpackSecurityCell)  {
+        return _jetpackSecurityCell;
     }
-    _removeSiteCell = [[WPTableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-    [WPStyleGuide configureTableViewDestructiveActionCell:_removeSiteCell];
-    _removeSiteCell.textLabel.text = NSLocalizedString(@"Remove Site", @"Button to remove a site from the app");
-    
-    return _removeSiteCell;
+    _jetpackSecurityCell = [[SettingTableViewCell alloc] initWithLabel:NSLocalizedString(@"Security", @"Label for selecting the Blog Jetpack Security Settings section")
+                                                                 editable:YES
+                                                          reuseIdentifier:nil];
+    return _jetpackSecurityCell;
 }
 
 - (void)configureDefaultCategoryCell
@@ -520,8 +516,8 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
         case SiteSettingsSectionDiscussion:
             return self.discussionSettingsCell;
 
-        case SiteSettingsSectionRemoveSite:
-            return self.removeSiteCell;
+        case SiteSettingsSectionJetpackSettings:
+            return self.jetpackSecurityCell;
 
         case SiteSettingsSectionAdvanced:
             return [self tableView:tableView cellForAdvancedSettingsAtRow:indexPath.row];
@@ -544,11 +540,6 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
     [WPStyleGuide configureTableViewSectionHeader:view];
 }
 
-- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    return WPTableViewDefaultRowHeight;
-}
-
 - (NSString *)titleForHeaderInSection:(NSInteger)section
 {
     NSString *headingTitle = nil;
@@ -563,6 +554,10 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
 
         case SiteSettingsSectionWriting:
             headingTitle = NSLocalizedString(@"Writing", @"Title for the writing section in site settings screen");
+            break;
+
+        case SiteSettingsSectionJetpackSettings:
+            headingTitle = NSLocalizedString(@"Jetpack", @"Title for the Jetpack section in site settings screen");
             break;
 
         case SiteSettingsSectionAdvanced:
@@ -789,8 +784,15 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
     NSParameterAssert([blog supportsSiteManagementServices]);
 
     [WPAppAnalytics track:WPAnalyticsStatSiteSettingsStartOverAccessed withBlog:self.blog];
-    StartOverViewController *viewController = [[StartOverViewController alloc] initWithBlog:blog];
-    [self.navigationController pushViewController:viewController animated:YES];
+    if (self.blog.hasPaidPlan) {
+        StartOverViewController *viewController = [[StartOverViewController alloc] initWithBlog:blog];
+        [self.navigationController pushViewController:viewController animated:YES];
+    } else {
+        NSURL *targetURL = [NSURL URLWithString:EmptySiteSupportURL];
+        WPWebViewController *webViewController = [WPWebViewController webViewControllerWithURL:targetURL];
+        UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:webViewController];
+        [self presentViewController:navController animated:YES completion:nil];
+    }
 }
 
 - (void)tableView:(UITableView *)tableView didSelectInAdvancedSectionRow:(NSInteger)row
@@ -830,9 +832,8 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
             [self showDiscussionSettingsForBlog:self.blog];
             break;
 
-        case SiteSettingsSectionRemoveSite:
-            [self showRemoveSiteForBlog:self.blog];
-            [tableView deselectSelectedRowWithAnimation:YES];
+        case SiteSettingsSectionJetpackSettings:
+            [self showJetpackSettingsForBlog:self.blog];
             break;
 
         case SiteSettingsSectionAdvanced:
@@ -888,7 +889,8 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
 
 - (void)validateLoginCredentials
 {
-    [SVProgressHUD showWithStatus:NSLocalizedString(@"Authenticating", @"") maskType:SVProgressHUDMaskTypeBlack];
+    [SVProgressHUD setDefaultMaskType:SVProgressHUDMaskTypeBlack];
+    [SVProgressHUD showWithStatus:NSLocalizedString(@"Authenticating", @"")];
 
     NSURL *xmlRpcURL = [NSURL URLWithString:self.blog.xmlrpc];
     WordPressOrgXMLRPCApi *api = [[WordPressOrgXMLRPCApi alloc] initWithEndpoint:xmlRpcURL userAgent:[WPUserAgent wordPressUserAgent]];
@@ -973,8 +975,10 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
     }
     
     BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:self.blog.managedObjectContext];
-    [blogService updateSettingsForBlog:self.blog success:nil failure:^(NSError *error) {
-        [SVProgressHUD showErrorWithStatus:NSLocalizedString(@"Settings update failed", @"Message to show when setting save failed")];
+    [blogService updateSettingsForBlog:self.blog success:^{
+        [NSNotificationCenter.defaultCenter postNotificationName:WPBlogUpdatedNotification object:nil];
+    } failure:^(NSError *error) {
+        [SVProgressHUD showDismissibleErrorWithStatus:NSLocalizedString(@"Settings update failed", @"Message to show when setting save failed")];
         DDLogError(@"Error while trying to update BlogSettings: %@", error);
     }];
 }
@@ -999,41 +1003,16 @@ NS_ENUM(NSInteger, SiteSettingsSection) {
     [self.navigationController pushViewController:settings animated:YES];
 }
 
+#pragma mark - Jetpack Settings
 
-#pragma mark - Remove Site
-
-- (void)showRemoveSiteForBlog:(Blog *)blog
+- (void)showJetpackSettingsForBlog:(Blog *)blog
 {
-    NSParameterAssert(blog);
-    
-    NSString *model = [[UIDevice currentDevice] localizedModel];
-    NSString *message = [NSString stringWithFormat:NSLocalizedString(@"Are you sure you want to continue?\n All site data will be removed from your %@.", @"Title for the remove site confirmation alert, %@ will be replaced with iPhone/iPad/iPod Touch"), model];
-    NSString *cancelTitle = NSLocalizedString(@"Cancel", nil);
-    NSString *destructiveTitle = NSLocalizedString(@"Remove Site", @"Button to remove a site from the app");
-    
-    UIAlertControllerStyle alertStyle = [UIDevice isPad] ? UIAlertControllerStyleAlert : UIAlertControllerStyleActionSheet;
-    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:nil
-                                                                             message:message
-                                                                      preferredStyle:alertStyle];
-    
-    [alertController addCancelActionWithTitle:cancelTitle handler:nil];
-    [alertController addDestructiveActionWithTitle:destructiveTitle handler:^(UIAlertAction *action) {
-        [self confirmRemoveSite:blog];
-    }];
-    
-    [self presentViewController:alertController animated:YES completion:nil];
-}
 
-- (void)confirmRemoveSite:(Blog *)blog
-{
     NSParameterAssert(blog);
-    
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-    [blogService removeBlog:blog];
-    [self.navigationController popToRootViewControllerAnimated:YES];
-}
 
+    JetpackSecuritySettingsViewController *settings = [[JetpackSecuritySettingsViewController alloc] initWithBlog:blog];
+    [self.navigationController pushViewController:settings animated:YES];
+}
 
 #pragma mark - PostCategoriesViewControllerDelegate
 

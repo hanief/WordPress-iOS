@@ -1,8 +1,9 @@
 #import "MenusSelectionDetailView.h"
-#import "WPStyleGuide.h"
 #import "Menu+ViewDesign.h"
 #import "MenusSelectionView.h"
-#import "WPFontManager.h"
+#import <WordPressShared/WPFontManager.h>
+#import <WordPressShared/WPStyleGuide.h>
+
 
 @import Gridicons;
 
@@ -91,7 +92,7 @@
     label.font = [WPFontManager systemRegularFontOfSize:17.0];
     label.textColor = [WPStyleGuide darkGrey];
     label.adjustsFontSizeToFitWidth = YES;
-    label.minimumScaleFactor = 0.50;
+    label.minimumScaleFactor = 0.70;
     label.allowsDefaultTighteningForTruncation = YES;
     _titleLabel = label;
 

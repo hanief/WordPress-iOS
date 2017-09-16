@@ -1,11 +1,13 @@
 #import "PostCategoriesViewController.h"
 #import "PostCategory.h"
-#import "NSString+XMLExtensions.h"
 #import "WordPressAppDelegate.h"
 #import "WPAddPostCategoryViewController.h"
 #import "WPCategoryTree.h"
-#import "WPTableViewCell.h"
 #import "CustomHighlightButton.h"
+#import "PostCategoryService.h"
+#import <WordPressShared/NSString+XMLExtensions.h>
+#import <WordPressShared/WPTableViewCell.h>
+#import "WordPress-Swift.h"
 
 static NSString * const CategoryCellIdentifier = @"CategoryCellIdentifier";
 static const CGFloat CategoryCellIndentation = 16.0;
@@ -19,6 +21,8 @@ static const CGFloat CategoryCellIndentation = 16.0;
 @property (nonatomic, strong) NSArray *categories;
 @property (nonatomic, assign) CategoriesSelectionMode selectionMode;
 @property (nonatomic, assign) BOOL addingNewCategory;
+@property (nonatomic, assign) BOOL hasInitiallySyncedCategories;
+
 @end
 
 @implementation PostCategoriesViewController
@@ -42,10 +46,14 @@ static const CGFloat CategoryCellIndentation = 16.0;
 
     self.tableView.accessibilityIdentifier = @"CategoriesList";
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
+    [WPStyleGuide configureAutomaticHeightRowsFor:self.tableView];
+
     // Hide extra cell separators.
     self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
     [self.tableView registerClass:[WPTableViewCell class] forCellReuseIdentifier:CategoryCellIdentifier];
-    
+
+    [self setupRefreshControl];
+
     // Show the add category button if we're selecting categories for a post.
     if (self.selectionMode == CategoriesSelectionModePost || self.selectionMode == CategoriesSelectionModeBlogDefault) {
         UIBarButtonItem *rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage imageNamed:@"icon-post-add"]
@@ -72,10 +80,25 @@ static const CGFloat CategoryCellIndentation = 16.0;
 {
     [super viewWillAppear:animated];
 
-    [self configureCategories];
+    [self reloadCategoriesTableViewData];
+
+    if (!self.hasInitiallySyncedCategories) {
+        self.hasInitiallySyncedCategories = YES;
+        [self syncCategories];
+    }
 }
 
 #pragma mark - Instance Methods
+
+- (void)setupRefreshControl
+{
+    if (self.refreshControl) {
+        return;
+    }
+    UIRefreshControl *refreshControl = [[UIRefreshControl alloc] init];
+    [refreshControl addTarget:self action:@selector(refreshCategoriesWithInteraction:) forControlEvents:UIControlEventValueChanged];
+    self.refreshControl = refreshControl;
+}
 
 - (BOOL)hasChanges
 {
@@ -95,7 +118,19 @@ static const CGFloat CategoryCellIndentation = 16.0;
                      completion:nil];
 }
 
-- (void)configureCategories
+- (void)syncCategories
+{
+    __weak __typeof__(self) weakSelf = self;
+    PostCategoryService *service = [[PostCategoryService alloc] initWithManagedObjectContext:self.blog.managedObjectContext];
+    [service syncCategoriesForBlog:self.blog success:^{
+        [weakSelf reloadCategoriesTableViewData];
+        [weakSelf.refreshControl endRefreshing];
+    } failure:^(NSError * _Nonnull error) {
+        [weakSelf.refreshControl endRefreshing];
+    }];
+}
+
+- (void)reloadCategoriesTableViewData
 {
     if (!self.selectedCategories) {
         self.selectedCategories = [self.originalSelection mutableCopy];
@@ -125,6 +160,20 @@ static const CGFloat CategoryCellIndentation = 16.0;
                                               forKey:[category.categoryID stringValue]];
     }
 
+    // Remove any previously selected category objects that are no longer available.
+    NSArray *selectedCategories = [self.selectedCategories copy];
+    for (PostCategory *category in selectedCategories) {
+        if ([category isDeleted] || ![self.blog.sortedCategories containsObject:category]) {
+            [self.selectedCategories removeObject:category];
+        }
+    }
+    // Notify the delegate of any changes for selectedCategories.
+    if (self.selectedCategories.count != selectedCategories.count) {
+        if ([self.delegate respondsToSelector:@selector(postCategoriesViewController:didUpdateSelectedCategories:)]) {
+            [self.delegate postCategoriesViewController:self didUpdateSelectedCategories:[NSSet setWithArray:self.selectedCategories]];
+        }
+    }
+
     [self.tableView reloadData];
 }
 
@@ -136,6 +185,13 @@ static const CGFloat CategoryCellIndentation = 16.0;
 
     PostCategory *category = [categoryDict objectForKey:parentID];
     return ([self indentationLevelForCategory:category.parentID categoryCollection:categoryDict]) + 1;
+}
+
+#pragma mark - Button Actions
+
+- (void)refreshCategoriesWithInteraction:(UIRefreshControl *)refreshControl
+{
+    [self syncCategories];
 }
 
 #pragma mark - UITableView Delegate & DataSource
@@ -168,7 +224,7 @@ static const CGFloat CategoryCellIndentation = 16.0;
     if (self.selectionMode == CategoriesSelectionModeParent) {
         if (row == 0) {
             [WPStyleGuide configureTableViewDestructiveActionCell:cell];
-            cell.textLabel.textAlignment = NSTextAlignmentLeft;
+            cell.textLabel.textAlignment = NSTextAlignmentNatural;
             
             cell.textLabel.text = NSLocalizedString(@"No Category",
                                                     @"Text shown (to select no-category) in the parent-category-selection screen when creating a new category.");

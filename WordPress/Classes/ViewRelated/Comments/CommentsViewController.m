@@ -7,10 +7,10 @@
 #import "WordPress-Swift.h"
 #import "WPTableViewHandler.h"
 #import "WPGUIConstants.h"
-#import "WPNoResultsView.h"
 #import "UIView+Subviews.h"
 #import "ContextManager.h"
-#import "WPStyleGuide.h"
+#import <WordPressShared/WPNoResultsView.h>
+#import <WordPressShared/WPStyleGuide.h>
 
 
 static CGRect const CommentsActivityFooterFrame                 = {0.0, 0.0, 30.0, 30.0};
@@ -26,9 +26,9 @@ static NSString *CommentsLayoutIdentifier                       = @"CommentsLayo
 @property (nonatomic, strong) WPTableViewHandler        *tableViewHandler;
 @property (nonatomic, strong) WPContentSyncHelper       *syncHelper;
 @property (nonatomic, strong) WPNoResultsView           *noResultsView;
-@property (nonatomic, strong) CommentsTableViewCell     *layoutCell;
 @property (nonatomic, strong) UIActivityIndicatorView   *footerActivityIndicator;
 @property (nonatomic, strong) UIView                    *footerView;
+@property (nonatomic, strong) NSCache                   *estimatedRowHeights;
 @end
 
 
@@ -47,6 +47,7 @@ static NSString *CommentsLayoutIdentifier                       = @"CommentsLayo
     if (self) {
         self.restorationClass = [self class];
         self.restorationIdentifier = NSStringFromClass([self class]);
+        self.estimatedRowHeights = [[NSCache alloc] init];
     }
     return self;
 }
@@ -63,7 +64,6 @@ static NSString *CommentsLayoutIdentifier                       = @"CommentsLayo
     [self configureTableView];
     [self configureTableViewFooter];
     [self configureTableViewHandler];
-    [self configureTableViewLayoutCell];
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -140,13 +140,13 @@ static NSString *CommentsLayoutIdentifier                       = @"CommentsLayo
 
 - (void)configureTableView
 {
+    self.tableView.cellLayoutMarginsFollowReadableWidth = YES;
     self.tableView.accessibilityIdentifier  = @"Comments Table";
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
     
     // Register the cells
     NSString *nibName   = [CommentsTableViewCell classNameWithoutNamespaces];
     UINib *nibInstance  = [UINib nibWithNibName:nibName bundle:[NSBundle mainBundle]];
-    [self.tableView registerNib:nibInstance forCellReuseIdentifier:CommentsLayoutIdentifier];
     [self.tableView registerNib:nibInstance forCellReuseIdentifier:CommentsReuseIdentifier];
 }
 
@@ -157,15 +157,9 @@ static NSString *CommentsLayoutIdentifier                       = @"CommentsLayo
     self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
 }
 
-- (void)configureTableViewLayoutCell
-{
-    self.layoutCell = [self.tableView dequeueReusableCellWithIdentifier:CommentsLayoutIdentifier];
-}
-
 - (void)configureTableViewHandler
 {
     WPTableViewHandler *tableViewHandler    = [[WPTableViewHandler alloc] initWithTableView:self.tableView];
-    tableViewHandler.cacheRowHeights        = YES;
     tableViewHandler.delegate               = self;
     self.tableViewHandler                   = tableViewHandler;
 }
@@ -174,17 +168,16 @@ static NSString *CommentsLayoutIdentifier                       = @"CommentsLayo
 
 - (CGFloat)tableView:(UITableView *)tableView estimatedHeightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    // Note:
-    // Without an estimated height, UITableView will have an erratic behavior
+    NSNumber *cachedHeight = [self.estimatedRowHeights objectForKey:indexPath];
+    if (cachedHeight.doubleValue) {
+        return cachedHeight.doubleValue;
+    }
     return WPTableViewDefaultRowHeight;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    NSParameterAssert(self.layoutCell);
-    [self configureCell:self.layoutCell atIndexPath:indexPath];
-    
-    return [self.layoutCell layoutHeightWithWidth:CGRectGetWidth(self.tableView.bounds)];
+    return UITableViewAutomaticDimension;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -199,6 +192,8 @@ static NSString *CommentsLayoutIdentifier                       = @"CommentsLayo
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
 {
+    [self.estimatedRowHeights setObject:@(cell.frame.size.height) forKey:indexPath];
+
     // Refresh only when we reach the last 3 rows in the last section!
     NSInteger numberOfRowsInSection     = [self.tableViewHandler tableView:tableView numberOfRowsInSection:indexPath.section];
     NSInteger lastSection               = [self.tableViewHandler numberOfSectionsInTableView:tableView] - 1;
@@ -257,7 +252,9 @@ static NSString *CommentsLayoutIdentifier                       = @"CommentsLayo
     UITableViewRowAction *trash = [UITableViewRowAction rowActionWithStyle:UITableViewRowActionStyleDestructive
                                                                      title:NSLocalizedString(@"Trash", @"Trashes a comment")
                                                                    handler:^(UITableViewRowAction * _Nonnull action, NSIndexPath * _Nonnull indexPath) {
-                                                                       [weakSelf deleteComment:comment];
+                                                                       [ReachabilityUtils onAvailableInternetConnectionDo:^{
+                                                                           [weakSelf deleteComment:comment];
+                                                                       }];
                                                                    }];
     trash.backgroundColor = [WPStyleGuide errorRed];
     [actions addObject:trash];
@@ -266,7 +263,9 @@ static NSString *CommentsLayoutIdentifier                       = @"CommentsLayo
         UITableViewRowAction *unapprove = [UITableViewRowAction rowActionWithStyle:UITableViewRowActionStyleNormal
                                                                              title:NSLocalizedString(@"Unapprove", @"Unapproves a Comment")
                                                                            handler:^(UITableViewRowAction * _Nonnull action, NSIndexPath * _Nonnull indexPath) {
-                                                                               [weakSelf unapproveComment:comment];
+                                                                               [ReachabilityUtils onAvailableInternetConnectionDo:^{
+                                                                                   [weakSelf unapproveComment:comment];
+                                                                               }];
                                                                            }];
         
         unapprove.backgroundColor = [WPStyleGuide grey];
@@ -275,7 +274,9 @@ static NSString *CommentsLayoutIdentifier                       = @"CommentsLayo
         UITableViewRowAction *approve = [UITableViewRowAction rowActionWithStyle:UITableViewRowActionStyleNormal
                                                                            title:NSLocalizedString(@"Approve", @"Approves a Comment")
                                                                          handler:^(UITableViewRowAction * _Nonnull action, NSIndexPath * _Nonnull indexPath) {
-                                                                             [weakSelf approveComment:comment];
+                                                                             [ReachabilityUtils onAvailableInternetConnectionDo:^{
+                                                                                 [weakSelf approveComment:comment];
+                                                                             }];
                                                                          }];
         
         approve.backgroundColor = [WPStyleGuide wordPressBlue];
@@ -347,7 +348,7 @@ static NSString *CommentsLayoutIdentifier                       = @"CommentsLayo
     cell.approved       = [comment.status isEqualToString:CommentStatusApproved];
     cell.postTitle      = comment.titleForDisplay;
     cell.content        = comment.contentPreviewForDisplay;
-    cell.timestamp      = [comment.dateCreated shortString];
+    cell.timestamp      = [comment.dateCreated mediumString];
     
     // Don't download the gravatar, if it's the layout cell!
     if ([cell.reuseIdentifier isEqualToString:CommentsLayoutIdentifier]) {
@@ -404,6 +405,10 @@ static NSString *CommentsLayoutIdentifier                       = @"CommentsLayo
                                                         failure(error);
                                                     });
                                                 }
+                                            if (userInteraction) {
+                                                NSString *title = NSLocalizedString(@"Unable to Sync", @"Title of error prompt shown when a sync the user initiated fails.");
+                                                [WPError showNetworkingAlertWithError:error title:title];
+                                            }
                                     }];
     }];
 }
@@ -438,7 +443,7 @@ static NSString *CommentsLayoutIdentifier                       = @"CommentsLayo
     [self refreshInfiniteScroll];
 }
 
-- (void)syncContentEnded
+- (void)syncContentEnded:(WPContentSyncHelper *)syncHelper
 {
     [self refreshInfiniteScroll];
     [self refreshNoResultsView];

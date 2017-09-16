@@ -2,9 +2,9 @@ import UIKit
 import WordPressShared
 
 @objc enum WPSplitViewControllerPrimaryColumnWidth: Int {
-    case Default
-    case Narrow
-    case Full
+    case `default`
+    case narrow
+    case full
 }
 
 @objc enum WPSplitViewControllerCollapseMode: Int {
@@ -14,8 +14,8 @@ import WordPressShared
 
 class WPSplitViewController: UISplitViewController {
 
-    static let navigationControllerRestorationIdentifier = "WPSplitViewDetailNavigationControllerRestorationID"
-    static let detailNavigationStackModifiedRestorationKey = "WPSplitViewDetailNavigationStackModifiedRestorationKey"
+    fileprivate static let navigationControllerRestorationIdentifier = "WPSplitViewDetailNavigationControllerRestorationID"
+    fileprivate static let preferredDisplayModeModifiedRestorationKey = "WPSplitViewPreferredDisplayModeRestorationKey"
 
     /// Determines how the split view handles the detail pane when collapsing itself.
     /// If 'Automatic', then the detail pane will be pushed onto the primary navigation stack
@@ -25,49 +25,69 @@ class WPSplitViewController: UISplitViewController {
     /// primary navigation stack.
     var collapseMode: WPSplitViewControllerCollapseMode = .Automatic
 
-    var wpPrimaryColumnWidth: WPSplitViewControllerPrimaryColumnWidth = .Default {
+    /// Set to false to disable fullscreen display mode
+    var fullscreenDisplayEnabled = true
+
+    var wpPrimaryColumnWidth: WPSplitViewControllerPrimaryColumnWidth = .default {
         didSet {
             updateSplitViewForPrimaryColumnWidth()
         }
     }
 
-    private enum WPSplitViewControllerNarrowPrimaryColumnWidth: CGFloat {
-        case Portrait = 230
-        case Landscape = 320
+    fileprivate enum WPSplitViewControllerNarrowPrimaryColumnWidth: CGFloat {
+        case portrait = 230
+        case landscape = 320
 
-        static func widthForInterfaceOrientation(orientation: UIInterfaceOrientation) -> CGFloat {
+        static func widthForInterfaceOrientation(_ orientation: UIInterfaceOrientation) -> CGFloat {
             // If the app is in multitasking (so isn't fullscreen), just use the narrow width
-            if let windowFrame = UIApplication.sharedApplication().keyWindow?.frame {
-                if windowFrame.width < UIScreen.mainScreen().bounds.width {
-                    return self.Portrait.rawValue
+            if let windowFrame = UIApplication.shared.keyWindow?.frame {
+                if windowFrame.width < UIScreen.main.bounds.width {
+                    return self.portrait.rawValue
                 }
             }
 
-            if UIInterfaceOrientationIsPortrait(orientation) || WPDeviceIdentification.isiPhoneSixPlus() {
-                return self.Portrait.rawValue
+            if UIInterfaceOrientationIsPortrait(orientation) || WPDeviceIdentification.isUnzoomediPhonePlus() {
+                return self.portrait.rawValue
             } else {
-                return self.Landscape.rawValue
+                return self.landscape.rawValue
             }
         }
     }
 
-    private func updateSplitViewForPrimaryColumnWidth() {
+    fileprivate func updateSplitViewForPrimaryColumnWidth() {
         switch wpPrimaryColumnWidth {
-        case .Default:
+        case .default:
             minimumPrimaryColumnWidth = UISplitViewControllerAutomaticDimension
             maximumPrimaryColumnWidth = UISplitViewControllerAutomaticDimension
             preferredPrimaryColumnWidthFraction = UISplitViewControllerAutomaticDimension
-        case .Narrow:
-            let orientation = UIApplication.sharedApplication().statusBarOrientation
+        case .narrow:
+            let orientation = UIApplication.shared.statusBarOrientation
             let columnWidth = WPSplitViewControllerNarrowPrimaryColumnWidth.widthForInterfaceOrientation(orientation)
 
             minimumPrimaryColumnWidth = columnWidth
             maximumPrimaryColumnWidth = columnWidth
-            preferredPrimaryColumnWidthFraction = UIScreen.mainScreen().bounds.width / columnWidth
-        case .Full:
-            maximumPrimaryColumnWidth = UIScreen.mainScreen().bounds.width
+            preferredPrimaryColumnWidthFraction = UIScreen.main.bounds.width / columnWidth
+        case .full:
+            maximumPrimaryColumnWidth = UIScreen.main.bounds.width
             preferredPrimaryColumnWidthFraction = 1.0
         }
+    }
+
+    // MARK: State restoration
+
+    override func encodeRestorableState(with coder: NSCoder) {
+        coder.encode(preferredDisplayMode.rawValue, forKey: type(of: self).preferredDisplayModeModifiedRestorationKey)
+
+        super.encodeRestorableState(with: coder)
+    }
+
+    override func decodeRestorableState(with coder: NSCoder) {
+        if let displayModeRawValue = coder.decodeObject(forKey: type(of: self).preferredDisplayModeModifiedRestorationKey) as? Int,
+            let displayMode = UISplitViewControllerDisplayMode(rawValue: displayModeRawValue) {
+            preferredDisplayMode = displayMode
+        }
+
+        super.decodeRestorableState(with: coder)
     }
 
     // MARK: View lifecycle
@@ -76,39 +96,58 @@ class WPSplitViewController: UISplitViewController {
         super.viewDidLoad()
 
         delegate = self
-        preferredDisplayMode = .AllVisible
+        preferredDisplayMode = .allVisible
 
         extendedLayoutIncludesOpaqueBars = true
     }
 
-    override func preferredStatusBarStyle() -> UIStatusBarStyle {
-        return .LightContent
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        return .lightContent
     }
 
-    override func overrideTraitCollectionForChildViewController(childViewController: UIViewController) -> UITraitCollection? {
-        guard let collection = super.overrideTraitCollectionForChildViewController(childViewController) else { return nil }
+    override var childViewControllerForStatusBarStyle: UIViewController? {
+        if let _ = topDetailViewController as? DefinesVariableStatusBarStyle {
+            return topDetailViewController
+        }
+        return nil
+    }
+
+    var overrideTraitCollection: UITraitCollection? = nil
+
+    override var traitCollection: UITraitCollection {
+        get {
+            if let overrideTraitCollection = overrideTraitCollection {
+                return UITraitCollection.init(traitsFrom: [super.traitCollection, overrideTraitCollection])
+            }
+
+            return super.traitCollection
+        }
+    }
+
+    override func overrideTraitCollection(forChildViewController childViewController: UIViewController) -> UITraitCollection? {
+        guard let collection = super.overrideTraitCollection(forChildViewController: childViewController) else { return nil }
 
         // By default, the detail view controller of a split view is passed the same size class as the split view itself.
         // However, if the splitview is smaller than full screen (i.e. multitasking is active), a number of our
         // view controllers will display better if we tell them they're compact even though the split view is regular.
         if childViewController == viewControllers.last && shouldOverrideDetailViewControllerHorizontalSizeClass {
-            return UITraitCollection(traitsFromCollections: [collection, UITraitCollection(horizontalSizeClass: .Compact)])
+            return UITraitCollection(traitsFrom: [collection, UITraitCollection(horizontalSizeClass: .compact)])
         }
 
         let overrideCollection = UITraitCollection(horizontalSizeClass: self.traitCollection.horizontalSizeClass)
-        return UITraitCollection(traitsFromCollections: [collection, overrideCollection])
+        return UITraitCollection(traitsFrom: [collection, overrideCollection])
     }
 
-    override func viewWillAppear(animated: Bool) {
+    override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
 
         updateDimmingViewFrame()
     }
 
-    override func viewWillTransitionToSize(size: CGSize, withTransitionCoordinator coordinator: UIViewControllerTransitionCoordinator) {
-        super.viewWillTransitionToSize(size, withTransitionCoordinator: coordinator)
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
 
-        coordinator.animateAlongsideTransition({ context in
+        coordinator.animate(alongsideTransition: { context in
             self.updateSplitViewForPrimaryColumnWidth()
             self.updateDimmingViewFrame()
         }, completion: nil)
@@ -116,7 +155,7 @@ class WPSplitViewController: UISplitViewController {
         // Calling `setOverrideTraitCollection` prompts `overrideTraitCollectionForChildViewController` to be called.
         if let _ = overriddenTraitCollectionForDetailViewController,
             let detailViewController = viewControllers.last {
-                setOverrideTraitCollection(detailViewController.traitCollection, forChildViewController: detailViewController)
+            setOverrideTraitCollection(detailViewController.traitCollection, forChildViewController: detailViewController)
         }
     }
 
@@ -136,21 +175,29 @@ class WPSplitViewController: UISplitViewController {
         }
     }
 
-    private var shouldOverrideDetailViewControllerHorizontalSizeClass: Bool {
-        return view.frame.width < UIScreen.mainScreen().bounds.width
+    fileprivate var shouldOverrideDetailViewControllerHorizontalSizeClass: Bool {
+        return view.frame.width < UIScreen.main.bounds.width
     }
 
-    private var overriddenTraitCollectionForDetailViewController: UITraitCollection? {
-        guard let detailViewController = viewControllers.last where shouldOverrideDetailViewControllerHorizontalSizeClass else {
+    fileprivate var overriddenTraitCollectionForDetailViewController: UITraitCollection? {
+        guard let detailViewController = viewControllers.last, shouldOverrideDetailViewControllerHorizontalSizeClass else {
             return nil
         }
 
-        return  UITraitCollection(traitsFromCollections: [detailViewController.traitCollection, UITraitCollection(horizontalSizeClass: .Compact)])
+        return  UITraitCollection(traitsFrom: [detailViewController.traitCollection, UITraitCollection(horizontalSizeClass: .compact)])
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+
+        if isViewHorizontallyCompact() && preferredDisplayMode == .primaryHidden {
+            setPrimaryViewControllerHidden(false, animated: false)
+        }
     }
 
     // MARK: - Dimming support
 
-    private lazy var dimmingView: UIView = {
+    fileprivate lazy var dimmingView: UIView = {
         let dimmingView = UIView()
         dimmingView.backgroundColor = WPStyleGuide.greyDarken30()
         return dimmingView
@@ -167,10 +214,10 @@ class WPSplitViewController: UISplitViewController {
         }
     }
 
-    private let dimmingViewAlpha: CGFloat = 0.5
-    private let dimmingViewAnimationDuration: NSTimeInterval = 0.3
+    fileprivate let dimmingViewAlpha: CGFloat = 0.5
+    fileprivate let dimmingViewAnimationDuration: TimeInterval = 0.3
 
-    private func dimDetailViewController(dimmed: Bool) {
+    func dimDetailViewController(_ dimmed: Bool) {
         if dimmed {
             if dimmingView.superview == nil {
                 view.addSubview(dimmingView)
@@ -179,12 +226,12 @@ class WPSplitViewController: UISplitViewController {
 
                 // Dismiss the keyboard from the detail view controller if active
                 topDetailViewController?.navigationController?.view.endEditing(true)
-                UIView.animateWithDuration(dimmingViewAnimationDuration, animations: {
+                UIView.animate(withDuration: dimmingViewAnimationDuration, animations: {
                     self.dimmingView.alpha = self.dimmingViewAlpha
                 })
             }
         } else if dimmingView.superview != nil {
-            UIView.animateWithDuration(dimmingViewAnimationDuration, animations: {
+            UIView.animate(withDuration: dimmingViewAnimationDuration, animations: {
                 self.dimmingView.alpha = WPAlphaZero
                 }, completion: { _ in
                     self.dimmingView.removeFromSuperview()
@@ -192,21 +239,26 @@ class WPSplitViewController: UISplitViewController {
         }
     }
 
-    private func updateDimmingViewFrame() {
+    fileprivate func updateDimmingViewFrame() {
         if dimmingView.superview != nil {
             dimmingView.frame = view.frame
-            dimmingView.frame.origin.x = primaryColumnWidth
+
+            if view.userInterfaceLayoutDirection() == .leftToRight {
+                dimmingView.frame.origin.x = primaryColumnWidth
+            } else {
+                dimmingView.frame.size.width = dimmingView.frame.size.width - primaryColumnWidth
+            }
         }
     }
 
     // MARK: - Detail view controller management
 
-    override func showDetailViewController(vc: UIViewController, sender: AnyObject?) {
+    override func showDetailViewController(_ vc: UIViewController, sender: Any?) {
         var detailVC = vc
 
         // Ensure that detail view controllers are wrapped in a navigation controller
         // when the split is not collapsed
-        if !collapsed {
+        if !isCollapsed {
             detailVC = wrapViewControllerInNavigationControllerIfRequired(vc)
         }
 
@@ -215,12 +267,34 @@ class WPSplitViewController: UISplitViewController {
         super.showDetailViewController(detailVC, sender: sender)
     }
 
+    /// The topmost view controller in the detail navigation stack (or the
+    /// primary stack if the split view is collapsed).
     var topDetailViewController: UIViewController? {
-        if collapsed {
+        if isCollapsed {
             return (viewControllers.first as? UINavigationController)?.topViewController
         } else {
             return (viewControllers.last as? UINavigationController)?.topViewController
         }
+    }
+
+    /// The bottommost view controller in the detail navigation stack (or the
+    /// first view controller after the last `WPSplitViewControllerDetailProvider`
+    /// in the primary stack if the split view is collapsed).
+    var rootDetailViewController: UIViewController? {
+        guard isCollapsed else {
+            return (viewControllers.last as? UINavigationController)?.viewControllers.first
+        }
+
+        guard let navigationController = viewControllers.first as? UINavigationController else {
+            return nil
+        }
+
+        guard let index = navigationController.viewControllers.lastIndex(where: { $0 is WPSplitViewControllerDetailProvider }),
+            navigationController.viewControllers.count > index + 1 else {
+            return nil
+        }
+
+        return navigationController.viewControllers[index + 1]
     }
 
     /** Sets the primary view controller of the split view as specified, and
@@ -228,7 +302,7 @@ class WPSplitViewController: UISplitViewController {
      *  conforms to `WPSplitViewControllerDetailProvider` and can vend a
      *  detail view controller.
      */
-    func setInitialPrimaryViewController(viewController: UIViewController) {
+    func setInitialPrimaryViewController(_ viewController: UIViewController) {
         var initialViewControllers = [viewController]
 
         if let navigationController = viewController as? UINavigationController,
@@ -244,7 +318,7 @@ class WPSplitViewController: UISplitViewController {
         }
     }
 
-    private func initialDetailViewControllerForPrimaryViewController(viewController: UIViewController) -> UIViewController? {
+    fileprivate func initialDetailViewControllerForPrimaryViewController(_ viewController: UIViewController) -> UIViewController? {
         guard let detailProvider = viewController as? WPSplitViewControllerDetailProvider,
         let detailViewController = detailProvider.initialDetailViewControllerForSplitView(self)  else {
             return nil
@@ -253,7 +327,7 @@ class WPSplitViewController: UISplitViewController {
         return wrapViewControllerInNavigationControllerIfRequired(detailViewController)
     }
 
-    private func wrapViewControllerInNavigationControllerIfRequired(viewController: UIViewController) -> UIViewController {
+    fileprivate func wrapViewControllerInNavigationControllerIfRequired(_ viewController: UIViewController) -> UIViewController {
         var navigationController: UINavigationController!
 
         if let viewController = viewController as? UINavigationController {
@@ -262,14 +336,62 @@ class WPSplitViewController: UISplitViewController {
             navigationController = UINavigationController(rootViewController: viewController)
         }
 
-        navigationController.restorationIdentifier = self.dynamicType.navigationControllerRestorationIdentifier
+        navigationController.restorationIdentifier = type(of: self).navigationControllerRestorationIdentifier
         navigationController.delegate = self
         navigationController.extendedLayoutIncludesOpaqueBars = true
+        WPStyleGuide.configureColors(for: navigationController.view, andTableView: nil)
 
         return navigationController
     }
 
-    private var detailNavigationStackHasBeenModified = false
+    fileprivate var detailNavigationStackHasBeenModified = false
+
+    /// Shows or hides the primary view controller pane.
+    ///
+    /// - Parameter hidden: If `true`, hide the primary view controller.
+    func setPrimaryViewControllerHidden(_ hidden: Bool, animated: Bool = true) {
+        guard fullscreenDisplayEnabled else { return }
+
+        let updateDisplayMode = {
+            self.preferredDisplayMode = (hidden) ? .primaryHidden : .allVisible
+        }
+
+        if animated {
+            UIView.animate(withDuration: WPFullscreenNavigationTransition.transitionDuration) {
+                updateDisplayMode()
+            }
+        } else {
+            updateDisplayMode()
+        }
+    }
+
+    /// Pops both the primary and detail navigation controllers (if present)
+    /// to their roots.
+    ///
+    func popToRootViewControllersAnimated(_ animated: Bool) {
+        let popOrScrollToTop = { (navigationController: UINavigationController) in
+            if navigationController.viewControllers.count > 1 {
+                navigationController.popToRootViewController(animated: animated)
+
+                // Ensure navigation bars are visible – otherwise if we popped
+                // back from e.g. a Reader Detail screen which had hidden its
+                // bars, they'd stay hidden.
+                navigationController.setNavigationBarHidden(false, animated: animated)
+            } else {
+                navigationController.scrollContentToTopAnimated(animated)
+            }
+
+        }
+
+        if let primaryNavigationController = viewControllers.first as? UINavigationController {
+            popOrScrollToTop(primaryNavigationController)
+
+            if let detailNavigationController = viewControllers.last as? UINavigationController,
+                primaryNavigationController != detailNavigationController {
+                popOrScrollToTop(detailNavigationController)
+            }
+        }
+    }
 }
 
 // MARK: - UISplitViewControllerDelegate
@@ -281,7 +403,7 @@ extension WPSplitViewController: UISplitViewControllerDelegate {
      *  navigation controller, so we'll pop off everything but the root view
      *  controller and wrap it in a navigation controller if necessary.
      */
-    func splitViewController(splitViewController: UISplitViewController, separateSecondaryViewControllerFromPrimaryViewController primaryViewController: UIViewController) -> UIViewController? {
+    func splitViewController(_ splitViewController: UISplitViewController, separateSecondaryFrom primaryViewController: UIViewController) -> UIViewController? {
         guard let primaryNavigationController = primaryViewController as? UINavigationController else {
             assertionFailure("Split view's primary view controller should be a navigation controller!")
             return nil
@@ -290,17 +412,17 @@ extension WPSplitViewController: UISplitViewControllerDelegate {
         var viewControllers: [UIViewController] = []
 
         // Splits the view controller list into primary and detail view controllers at the specified index
-        let separateViewControllersAtIndex: (Int -> Void) = { index in
-            viewControllers = Array(primaryNavigationController.viewControllers.suffixFrom(index))
-            primaryNavigationController.viewControllers = Array(primaryNavigationController.viewControllers.prefixUpTo(index))
+        let separateViewControllersAtIndex: ((Int) -> Void) = { index in
+            viewControllers = Array(primaryNavigationController.viewControllers.suffix(from: index))
+            primaryNavigationController.viewControllers = Array(primaryNavigationController.viewControllers.prefix(upTo: index))
         }
 
-        if let index = primaryNavigationController.viewControllers.indexOf({ $0 is UINavigationController }) {
+        if let index = primaryNavigationController.viewControllers.index(where: { $0 is UINavigationController }) {
             // If there's another navigation controller somewhere in the primary navigation stack
             // (this is the default behaviour of a collapse), then we'll split the view controllers
             // apart at that point.
             separateViewControllersAtIndex(index)
-        } else if let index = primaryNavigationController.viewControllers.lastIndexOf({ $0 is WPSplitViewControllerDetailProvider }) {
+        } else if let index = primaryNavigationController.viewControllers.lastIndex(where: { $0 is WPSplitViewControllerDetailProvider }) {
             // Otherwise, if there's a detail provider somewhere in the stack, find the last one
             separateViewControllersAtIndex(index + 1)
         }
@@ -322,14 +444,15 @@ extension WPSplitViewController: UISplitViewControllerDelegate {
         } else {
             let navigationController = UINavigationController()
             navigationController.delegate = self
-            navigationController.restorationIdentifier = self.dynamicType.navigationControllerRestorationIdentifier
+            navigationController.restorationIdentifier = type(of: self).navigationControllerRestorationIdentifier
             navigationController.viewControllers = viewControllers
+            WPStyleGuide.configureColors(for: navigationController.view, andTableView: nil)
 
             return navigationController
         }
     }
 
-    func splitViewController(splitViewController: UISplitViewController, collapseSecondaryViewController secondaryViewController: UIViewController, ontoPrimaryViewController primaryViewController: UIViewController) -> Bool {
+    func splitViewController(_ splitViewController: UISplitViewController, collapseSecondary secondaryViewController: UIViewController, onto primaryViewController: UIViewController) -> Bool {
         let detailDimmed = isDetailViewDimmed
 
         // Un-dim the detail view
@@ -358,7 +481,7 @@ extension WPSplitViewController: UISplitViewControllerDelegate {
                                        primaryViewController.viewControllers.last is WPSplitViewControllerDetailProvider)
 
                 if detailNavigationStackHasBeenModified || forceKeepDetail {
-                    primaryViewController.viewControllers.appendContentsOf(secondaryViewController.viewControllers)
+                    primaryViewController.viewControllers.append(contentsOf: secondaryViewController.viewControllers)
                 }
             }
 
@@ -368,7 +491,7 @@ extension WPSplitViewController: UISplitViewControllerDelegate {
         return false
     }
 
-    private var isDetailViewDimmed: Bool {
+    fileprivate var isDetailViewDimmed: Bool {
         return dimmingView.superview != nil
     }
 }
@@ -376,7 +499,7 @@ extension WPSplitViewController: UISplitViewControllerDelegate {
 // MARK: - UINavigationControllerDelegate
 
 extension WPSplitViewController: UINavigationControllerDelegate {
-    func navigationController(navigationController: UINavigationController, willShowViewController viewController: UIViewController, animated: Bool) {
+    func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
         if navigationController == viewControllers.first {
             primaryNavigationController(navigationController, willShowViewController: viewController, animated: animated)
         } else if navigationController == viewControllers.last {
@@ -384,15 +507,15 @@ extension WPSplitViewController: UINavigationControllerDelegate {
         }
     }
 
-    private func primaryNavigationController(navigationController: UINavigationController, willShowViewController viewController: UIViewController, animated: Bool) {
+    fileprivate func primaryNavigationController(_ navigationController: UINavigationController, willShowViewController viewController: UIViewController, animated: Bool) {
 
-        if let coordinator = navigationController.topViewController?.transitionCoordinator() {
+        if let coordinator = navigationController.topViewController?.transitionCoordinator {
             // If the user is popping back to the root view controller using the
             // interactive pop transition, we need to check whether the gesture
             // gets cancelled so that we can undim the detail view if necessary.
             // (i.e. the user begins a back swipe but doesn't go through with it)
-            coordinator.notifyWhenInteractionEndsUsingBlock({ [weak self] context in
-                if context.initiallyInteractive() && context.isCancelled() {
+            coordinator.notifyWhenInteractionChanges({ [weak self] context in
+                if context.initiallyInteractive && context.isCancelled {
                     self?.dimDetailViewController(false)
                 }
             })
@@ -401,18 +524,129 @@ extension WPSplitViewController: UINavigationControllerDelegate {
         dimDetailViewControllerIfNecessary()
     }
 
-    private func detailNavigationController(navigationController: UINavigationController, willShowViewController viewController: UIViewController, animated: Bool) {
+    fileprivate func detailNavigationController(_ navigationController: UINavigationController, willShowViewController viewController: UIViewController, animated: Bool) {
         if navigationController.viewControllers.count > 1 {
             detailNavigationStackHasBeenModified = true
         }
+
+        let hasFullscreenViewControllersInStack = navigationController.viewControllers.filter({$0 is PrefersFullscreenDisplay}).count > 0
+        let isCurrentlyFullscreen = preferredDisplayMode != .allVisible
+
+        // Handle popping from fullscreen view controllers
+        //
+        // If we're currently in fullscreen mode, and there are no view controllers
+        // left in the navigation stack that prefer to be fullscreen, then
+        // animate back to a standard split view.
+        if fullscreenDisplayEnabled && isCurrentlyFullscreen && !hasFullscreenViewControllersInStack {
+            let performTransition = { (animated: Bool) in
+                self.setPrimaryViewControllerHidden(false, animated: animated)
+
+                if animated && !self.isViewHorizontallyCompact() {
+                    navigationController.navigationBar.fadeOutNavigationItems(animated: true)
+                }
+            }
+
+            if UIAccessibilityIsReduceMotionEnabled() {
+                view.hideWithBlankingSnapshot(afterScreenUpdates: false)
+                performTransition(false)
+            } else {
+                performTransition(animated)
+            }
+        }
     }
 
-    private func dimDetailViewControllerIfNecessary() {
-        if let primaryNavigationController = viewControllers.first as? UINavigationController where
-            dimsDetailViewControllerAutomatically && !collapsed {
+    func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
+        // Unfortunately by default when implementing custom navigation controller
+        // transitions, the interactive gesture is disabled. To work around this,
+        // we can implement the delegate ourselves (see: http://stackoverflow.com/a/38859457/570547)
+        navigationController.interactivePopGestureRecognizer?.delegate = self
+
+        if !isViewHorizontallyCompact() {
+            // Restore navigation items after a push or pop if they were previously hidden
+            navigationController.navigationBar.fadeInNavigationItemsIfNecessary()
+
+            if UIAccessibilityIsReduceMotionEnabled() {
+                view.fadeOutAndRemoveBlankingSnapshot()
+            }
+        }
+    }
+
+    func navigationController(_ navigationController: UINavigationController, animationControllerFor operation: UINavigationControllerOperation, from fromVC: UIViewController, to toVC: UIViewController) -> UIViewControllerAnimatedTransitioning? {
+        guard fullscreenDisplayEnabled else { return nil }
+
+        var stack = navigationController.viewControllers
+        if operation == .push {
+            // During a push, the new VC has already been added to the stack
+            stack.removeLast()
+        }
+
+        let hasFullscreenViewControllersInStack = stack.filter({$0 is PrefersFullscreenDisplay}).count > 0
+        let transitionInvolvesFullscreenViewController = toVC is PrefersFullscreenDisplay || fromVC is PrefersFullscreenDisplay
+        let movingFromOrToFullscreen = !hasFullscreenViewControllersInStack && transitionInvolvesFullscreenViewController
+
+        if !isViewHorizontallyCompact() && movingFromOrToFullscreen {
+            return WPFullscreenNavigationTransition(operation: operation)
+        }
+
+        return nil
+    }
+
+    fileprivate func dimDetailViewControllerIfNecessary() {
+        if let primaryNavigationController = viewControllers.first as? UINavigationController,
+            dimsDetailViewControllerAutomatically && !isCollapsed {
             let shouldDim = primaryNavigationController.viewControllers.count == 1
             dimDetailViewController(shouldDim)
         }
+    }
+}
+
+// MARK: - UIGestureRecognizerDelegate
+
+// Used to selectively enable / disable our navigation controllers'
+// interactive pop gesture recognizers
+extension WPSplitViewController: UIGestureRecognizerDelegate {
+
+    // We want to disable the interactive back gesture in a couple of situations:
+    //
+    // 1. There's only one view controller in the navigation stack
+    //
+    // 2. The top view controller is a fullscreen view controller, and navigating
+    //    back means we would switch back to a split view. The interactive
+    //    gesture doesn't work with the split view showing / hiding its primary
+    //    view controller pane.
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        func gestureIsValidInNavigationController(_ navigationController: UINavigationController) -> Bool {
+            return gestureRecognizer.view == navigationController.view &&
+                navigationController.viewControllers.count > 1
+        }
+
+        // If the gesture is in the primary view controller and there's more 
+        // than 2 view controllers in the primary navigation stack then allow 
+        // the back gesture.
+        if let primaryNavigationController = viewControllers.first as? UINavigationController,
+            gestureIsValidInNavigationController(primaryNavigationController) {
+            return true
+        }
+
+        // Same check but for the detail view controller
+        if let detailNavigationController = viewControllers.last as? UINavigationController,
+            gestureIsValidInNavigationController(detailNavigationController) && !isCollapsed {
+            guard fullscreenDisplayEnabled else { return true }
+
+            // Don't allow the back gesture if we're switching back from
+            // fullscreen to split view
+            var stack = detailNavigationController.viewControllers
+            let topViewController = stack.popLast() // Remove the top view controller
+
+            let currentlyFullscreen = topViewController is PrefersFullscreenDisplay
+            let hasFullscreenViewControllersInStack = stack.filter({$0 is PrefersFullscreenDisplay}).count > 0
+
+            let movingFromFullscreen = currentlyFullscreen && !hasFullscreenViewControllersInStack
+
+            return !movingFromFullscreen
+        }
+
+        return false
     }
 }
 
@@ -424,6 +658,23 @@ extension UIViewController {
     }
 }
 
+/// Used to indicate whether a view controller would prefer its splitview
+/// to hide the primary view controller pane.
+///
+/// This isn't actually used on presentation of a view controller, but is used
+/// to keep track of whether any view controllers in the navigation stack
+/// would like to be fullscreen.
+///
+/// Once we've pushed a fullscreen view controller, the split view will remain
+/// in fullscreen until the `navigationController(_:willShowViewController:animated:)`
+/// delegate method detects that there are no fullscreen view controllers left
+/// in the stack.
+protocol PrefersFullscreenDisplay: class {}
+
+/// Used to indicate whether a view controller varies its preferred status bar style.
+///
+protocol DefinesVariableStatusBarStyle: class {}
+
 // MARK: - WPSplitViewControllerDetailProvider Protocol
 
 @objc
@@ -432,5 +683,5 @@ protocol WPSplitViewControllerDetailProvider {
      * View controllers that implement this method can return a view controller
      * to automatically populate the detail pane of the split view with.
      */
-    func initialDetailViewControllerForSplitView(splitView: WPSplitViewController) -> UIViewController?
+    func initialDetailViewControllerForSplitView(_ splitView: WPSplitViewController) -> UIViewController?
 }

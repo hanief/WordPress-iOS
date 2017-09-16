@@ -43,6 +43,24 @@ extern NSString *const WPAccountEmailAndDefaultBlogUpdatedNotification;
 - (void)removeDefaultWordPressComAccount;
 
 /**
+ Returns if the given account is the default WordPress.com account.
+ */
+- (BOOL)isDefaultWordPressComAccount:(WPAccount *)account;
+
+/**
+ Query to check if a wpcom account requires a passwordless login option. Note that
+ if there is no acccount matching the supplied identifier the REST endpoing
+ returns a 404 error code.
+
+ @param identifier - May be an email address, username, or user ID.
+ @param success
+ @param failure
+ */
+- (void)isPasswordlessAccount:(NSString *)identifier
+                      success:(void (^)(BOOL passwordless))success
+                      failure:(void (^)(NSError *error))failure;
+
+/**
  Query to check if an email address is paired to a wpcom account. Used in the 
  magic links signup flow.
 
@@ -51,6 +69,18 @@ extern NSString *const WPAccountEmailAndDefaultBlogUpdatedNotification;
  @param failure
  */
 - (void)isEmailAvailable:(NSString *)email success:(void (^)(BOOL available))success failure:(void (^)(NSError *error))failure;
+
+/**
+ Query to check if a username is available. Used in the signup flow.
+ 
+ @param email
+ @param success
+ @param failure
+ */
+- (void)isUsernameAvailable:(NSString *)username
+                    success:(void (^)(BOOL available))success
+                    failure:(void (^)(NSError *error))failure;
+
 
 /**
  Requets a one-time authentication link sent to an existing account associated with the
@@ -113,12 +143,9 @@ extern NSString *const WPAccountEmailAndDefaultBlogUpdatedNotification;
 
 
 /**
- Removes an account if it won't be used anymore.
- 
- For self hosted accounts, the account will be removed if there are no associated blogs
- For WordPress.com accounts, the account will be removed if it's not the default account and there are no associated blogs
+ Removes an account if it's not the default account and there are no associated blogs
  */
-- (void)purgeAccount:(WPAccount *)account;
+- (void)purgeAccountIfUnused:(WPAccount *)account;
 
 ///--------------------
 /// @name Visible blogs

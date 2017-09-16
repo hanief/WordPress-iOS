@@ -2,20 +2,25 @@
 /// different builds.
 @objc
 enum FeatureFlag: Int {
-    case NativeEditor
-    case ExampleFeature
+    case exampleFeature
+    case newMediaExports
+    case newInputMediaPicker
+    case pluginManagement
+    case googleLogin
 
     /// Returns a boolean indicating if the feature is enabled
     var enabled: Bool {
         switch self {
-        case .ExampleFeature:
+        case .exampleFeature:
             return true
-        case .NativeEditor:
-            // At the moment this is only active in debug mode
-            if build(.Alpha, .Debug) {
-                return true
-            }
-            return false
+        case .newMediaExports:
+            return build(.localDeveloper, .a8cBranchTest)
+        case .newInputMediaPicker:
+            return build(.a8cPrereleaseTesting, .a8cBranchTest, .localDeveloper)
+        case .pluginManagement:
+            return build(.localDeveloper)
+        case .googleLogin:
+            return build(.localDeveloper)
         }
     }
 }
@@ -25,21 +30,21 @@ enum FeatureFlag: Int {
 /// Since we can't expose properties on Swift enums we use a class instead
 class Feature: NSObject {
     /// Returns a boolean indicating if the feature is enabled
-    static func enabled(feature: FeatureFlag) -> Bool {
+    static func enabled(_ feature: FeatureFlag) -> Bool {
         return feature.enabled
     }
 }
 
 /// Represents a build configuration.
 enum Build: Int {
-    /// Development build, usually what you get when you run from Xcode
-    case Debug
-    /// Daily buiilds released internally for Automattic employees
-    case Alpha
+    /// Development build, usually run from Xcode
+    case localDeveloper
+    /// Continuous integration builds for Automattic employees to test branches & PRs
+    case a8cBranchTest
     /// Beta released internally for Automattic employees
-    case Internal
+    case a8cPrereleaseTesting
     /// Production build released in the app store
-    case AppStore
+    case appStore
 
     /// Returns the current build type
     static var current: Build {
@@ -48,13 +53,13 @@ enum Build: Int {
         }
 
         #if DEBUG
-            return .Debug
+            return .localDeveloper
         #elseif ALPHA_BUILD
-            return .Alpha
+            return .a8cBranchTest
         #elseif INTERNAL_BUILD
-            return .Internal
+            return .a8cPrereleaseTesting
         #else
-            return .AppStore
+            return .appStore
         #endif
     }
 
@@ -66,9 +71,9 @@ enum Build: Int {
 ///
 /// Example:
 ///
-///     let enableExperimentalStuff = build(.Debug, .Internal)
-func build(any: Build...) -> Bool {
-    return any.reduce(false, combine: { previous, buildValue in
+///     let enableExperimentalStuff = build(.localDeveloper, .a8cBranchTest)
+func build(_ any: Build...) -> Bool {
+    return any.reduce(false, { previous, buildValue in
         previous || Build.current == buildValue
     })
 }

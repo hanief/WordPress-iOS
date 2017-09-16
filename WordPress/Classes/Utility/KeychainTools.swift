@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import CocoaLumberjack
 
 private let keychainDebugWipeArgument = "WipeKeychainItem"
 
@@ -22,15 +23,15 @@ final class KeychainTools: NSObject {
     /// - Attention: This is only enabled in debug builds.
     ///
     static func processKeychainDebugArguments() {
-        guard build(.Debug) else {
+        guard build(.localDeveloper) else {
             return
         }
 
-        guard let item = NSUserDefaults.standardUserDefaults().valueForKey(keychainDebugWipeArgument) as? String else {
+        guard let item = UserDefaults.standard.value(forKey: keychainDebugWipeArgument) as? String else {
             return
         }
 
-        DDLogSwift.logWarn("🔑 Attempting to remove keychain entry for \(item)")
+        DDLogWarn("🔑 Attempting to remove keychain entry for \(item)")
         if let service = serviceForItem(item) {
             removeKeychainItem(forService: service)
         } else {
@@ -38,7 +39,7 @@ final class KeychainTools: NSObject {
         }
     }
 
-    static private func serviceForItem(item: String) -> String? {
+    static fileprivate func serviceForItem(_ item: String) -> String? {
         switch item {
         case "wordpress.com":
             return "public-api.wordpress.com"
@@ -49,32 +50,32 @@ final class KeychainTools: NSObject {
         }
     }
 
-    static private func removeKeychainItem(forService service: String) {
+    static fileprivate func removeKeychainItem(forService service: String) {
         let query: [NSString: AnyObject] = [
             kSecClass: kSecClassGenericPassword,
-            kSecAttrService: service
+            kSecAttrService: service as AnyObject
         ]
-        let status = SecItemDelete(query)
+        let status = SecItemDelete(query as CFDictionary)
         switch status {
         case errSecSuccess:
-            DDLogSwift.logWarn("🔑 Removed keychain entry for service \(service)")
+            DDLogWarn("🔑 Removed keychain entry for service \(service)")
         case errSecItemNotFound:
-            DDLogSwift.logWarn("🔑 Keychain entry not found for service \(service)")
+            DDLogWarn("🔑 Keychain entry not found for service \(service)")
         default:
-            DDLogSwift.logWarn("🔑 Error removing keychain entry for service \(service): \(status)")
+            DDLogWarn("🔑 Error removing keychain entry for service \(service): \(status)")
         }
     }
 
-    static private func removeAllKeychainItems() {
+    static fileprivate func removeAllKeychainItems() {
         let query: [NSString: AnyObject] = [
             kSecClass: kSecClassGenericPassword
         ]
-        let status = SecItemDelete(query)
+        let status = SecItemDelete(query as CFDictionary)
         switch status {
         case errSecSuccess:
-            DDLogSwift.logWarn("🔑 Removed all keychain entries")
+            DDLogWarn("🔑 Removed all keychain entries")
         default:
-            DDLogSwift.logWarn("🔑 Error removing all keychain entries: \(status)")
+            DDLogWarn("🔑 Error removing all keychain entries: \(status)")
         }
     }
 }

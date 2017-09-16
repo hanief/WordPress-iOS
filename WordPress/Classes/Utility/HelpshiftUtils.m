@@ -1,8 +1,7 @@
-#import "HelpShiftUtils.h"
+#import "HelpshiftUtils.h"
 
-#import <Helpshift/HelpshiftCore.h>
-#import <Helpshift/HelpshiftSupport.h>
-#import <Mixpanel/MPTweakInline.h>
+#import "HelpshiftCore.h"
+#import "HelpshiftSupport.h"
 
 #import "AccountService.h"
 #import "ApiCredentials.h"
@@ -10,12 +9,13 @@
 #import "BlogService.h"
 #import "ContextManager.h"
 #import "WPAccount.h"
+#import <WordPressShared/WPAnalytics.h>
 
 NSString *const UserDefaultsHelpshiftEnabled = @"wp_helpshift_enabled";
 NSString *const UserDefaultsHelpshiftWasUsed = @"wp_helpshift_used";
 NSString *const HelpshiftUnreadCountUpdatedNotification = @"HelpshiftUnreadCountUpdatedNotification";
 // This delay is required to give some time to Mixpanel to update the remote variable
-CGFloat const HelpshiftFlagCheckDelay = 10.0;
+CGFloat const HelpshiftFlagCheckDelay = 2.0;
 
 @interface HelpshiftUtils () <HelpshiftSupportDelegate>
 
@@ -72,12 +72,9 @@ CGFloat const HelpshiftFlagCheckDelay = 10.0;
         [defaults synchronize];
         return;
     }
-    
-    if (MPTweakValue(@"Helpshift Enabled", YES)) {
-        [self enableHelpshift];
-    } else {
-        [self disableHelpshiftIfNotAlreadyUsed];
-    }
+
+    // TODO: Replace Mixpanel tweak to enable/disable Helpshift
+    [self enableHelpshift];
 }
 
 - (void)enableHelpshift
@@ -122,7 +119,7 @@ CGFloat const HelpshiftFlagCheckDelay = 10.0;
 
 + (void)refreshUnreadNotificationCount
 {
-    [HelpshiftSupport getNotificationCountFromRemote:YES];
+    [HelpshiftSupport requestUnreadMessagesCount:YES];
 }
 
 + (NSArray<NSString *> *)planTagsForAccount:(WPAccount *)account
@@ -139,7 +136,7 @@ CGFloat const HelpshiftFlagCheckDelay = 10.0;
     return [tags allObjects];
 }
 
-+ (NSDictionary<NSString *, NSObject *> *)helpshiftMetadata
++ (NSDictionary<NSString *, NSObject *> *)helpshiftMetadataWithTags:(NSArray<NSString *> *)extraTags;
 {
     NSManagedObjectContext *context = [[ContextManager sharedInstance] newDerivedContext];
     AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
@@ -148,7 +145,8 @@ CGFloat const HelpshiftFlagCheckDelay = 10.0;
 
     NSString *isWPCom = (defaultAccount != nil) ? @"Yes" : @"No";
     NSMutableDictionary *metaData = [NSMutableDictionary dictionaryWithDictionary:@{ @"isWPCom" : isWPCom }];
-
+    NSMutableArray *tags = [NSMutableArray arrayWithArray:extraTags];
+    
     NSArray *allBlogs = [blogService blogsForAllAccounts];
     for (int i = 0; i < allBlogs.count; i++) {
         Blog *blog = allBlogs[i];
@@ -159,12 +157,14 @@ CGFloat const HelpshiftFlagCheckDelay = 10.0;
 
         if (defaultAccount) {
             [metaData addEntriesFromDictionary:@{@"WPCom Username": defaultAccount.username}];
-            NSArray *tags = [HelpshiftUtils planTagsForAccount:defaultAccount];
-            if (tags) {
-                [metaData setObject:tags forKey:HelpshiftSupportTagsKey];
+            NSArray *planTags = [HelpshiftUtils planTagsForAccount:defaultAccount];
+            if (planTags) {
+                [tags addObjectsFromArray:planTags];
             }
         }
     }
+    
+    [metaData setObject:tags forKey:HelpshiftSupportTagsKey];
 
     return [metaData copy];
 }
@@ -179,6 +179,11 @@ CGFloat const HelpshiftFlagCheckDelay = 10.0;
 }
 
 - (void)didReceiveNotificationCount:(NSInteger)count
+{
+    // Helpshift deprecated this in 6.1 but didn't mark it as optional :(
+}
+
+- (void)didReceiveUnreadMessagesCount:(NSInteger)count
 {
     self.unreadNotificationCount = count;
 

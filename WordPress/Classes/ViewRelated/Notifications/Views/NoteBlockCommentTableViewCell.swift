@@ -2,9 +2,8 @@ import Foundation
 import WordPressShared.WPStyleGuide
 
 
-class NoteBlockCommentTableViewCell: NoteBlockTextTableViewCell
-{
-    typealias EventHandler = ((sender: AnyObject) -> Void)
+class NoteBlockCommentTableViewCell: NoteBlockTextTableViewCell {
+    typealias EventHandler = ((_ sender: AnyObject) -> Void)
 
     // MARK: - Public Properties
     var onDetailsClick: EventHandler?
@@ -26,11 +25,6 @@ class NoteBlockCommentTableViewCell: NoteBlockTextTableViewCell
     var isApproved: Bool = false {
         didSet {
             refreshApprovalColors()
-            refreshSeparators()
-        }
-    }
-    var isRepliedComment: Bool = false {
-        didSet {
             refreshSeparators()
         }
     }
@@ -56,13 +50,13 @@ class NoteBlockCommentTableViewCell: NoteBlockTextTableViewCell
 
 
     // MARK: - Public Methods
-    func downloadGravatarWithURL(url: NSURL?) {
+    func downloadGravatarWithURL(_ url: URL?) {
         let gravatar = url.flatMap { Gravatar($0) }
 
         gravatarImageView.downloadGravatar(gravatar, placeholder: placeholderImage, animate: true)
     }
 
-    func downloadGravatarWithEmail(email: String?) {
+    func downloadGravatarWithEmail(_ email: String?) {
         guard let unwrappedEmail = email else {
             gravatarImageView.image = placeholderImage
             return
@@ -82,7 +76,7 @@ class NoteBlockCommentTableViewCell: NoteBlockTextTableViewCell
 
         // Setup Recognizers
         detailsLabel.gestureRecognizers = [ UITapGestureRecognizer(target: self, action: #selector(NoteBlockCommentTableViewCell.detailsWasPressed(_:))) ]
-        detailsLabel.userInteractionEnabled = true
+        detailsLabel.isUserInteractionEnabled = true
     }
 
 
@@ -94,11 +88,7 @@ class NoteBlockCommentTableViewCell: NoteBlockTextTableViewCell
         separatorsView.leftColor = Style.blockUnapprovedSideColor
 
         // Bottom Separator
-        var bottomInsets = separatorUnapprovedInsets
-        if isApproved {
-            bottomInsets = isRepliedComment ? separatorRepliedInsets : separatorApprovedInsets
-        }
-
+        let bottomInsets = isApproved ? readableSeparatorInsets : separatorUnapprovedInsets
         separatorsView.bottomVisible = true
         separatorsView.bottomInsets = bottomInsets
         separatorsView.bottomColor = Style.blockSeparatorColorForComment(isApproved: isApproved)
@@ -107,7 +97,7 @@ class NoteBlockCommentTableViewCell: NoteBlockTextTableViewCell
         separatorsView.backgroundColor = Style.blockBackgroundColorForComment(isApproved: isApproved)
     }
 
-    private func refreshDetails() {
+    fileprivate func refreshDetails() {
         var details = timestamp ?? String()
         if let unwrappedSite = site {
             details = String(format: "%@ • %@", details, unwrappedSite)
@@ -116,14 +106,14 @@ class NoteBlockCommentTableViewCell: NoteBlockTextTableViewCell
         detailsLabel.text = details
     }
 
-    private func refreshApprovalColors() {
+    fileprivate func refreshApprovalColors() {
         titleLabel.textColor = Style.blockTitleColorForComment(isApproved: isApproved)
         detailsLabel.textColor = Style.blockDetailsColorForComment(isApproved: isApproved)
         linkColor = Style.blockLinkColorForComment(isApproved: isApproved)
         attributedText = isApproved ? attributedCommentText : attributedCommentUnapprovedText
     }
 
-    private var attributedCommentUnapprovedText : NSAttributedString? {
+    fileprivate var attributedCommentUnapprovedText: NSAttributedString? {
         guard let commentText = attributedCommentText?.mutableCopy() as? NSMutableAttributedString else {
             return nil
         }
@@ -139,8 +129,8 @@ class NoteBlockCommentTableViewCell: NoteBlockTextTableViewCell
 
 
     // MARK: - Event Handlers
-    @IBAction func detailsWasPressed(sender: AnyObject) {
-        onDetailsClick?(sender: sender)
+    @IBAction func detailsWasPressed(_ sender: AnyObject) {
+        onDetailsClick?(sender)
     }
 
 
@@ -148,18 +138,16 @@ class NoteBlockCommentTableViewCell: NoteBlockTextTableViewCell
     typealias Style = WPStyleGuide.Notifications
 
     // MARK: - Private Calculated Properties
-    private var placeholderImage : UIImage {
+    fileprivate var placeholderImage: UIImage {
         return Style.blockGravatarPlaceholderImage(isApproved: isApproved)
     }
 
     // MARK: - Private Constants
-    private let separatorApprovedInsets = UIEdgeInsets(top: 0.0, left: 12.0, bottom: 0.0, right: 12.0)
-    private let separatorUnapprovedInsets = UIEdgeInsetsZero
-    private let separatorRepliedInsets = UIEdgeInsets(top: 0.0, left: 12.0, bottom: 0.0, right: 0.0)
+    fileprivate let separatorUnapprovedInsets = UIEdgeInsets.zero
 
     // MARK: - IBOutlets
-    @IBOutlet private weak var actionsView: UIView!
-    @IBOutlet private weak var gravatarImageView: CircularImageView!
-    @IBOutlet private weak var titleLabel: UILabel!
-    @IBOutlet private weak var detailsLabel: UILabel!
+    @IBOutlet fileprivate weak var actionsView: UIView!
+    @IBOutlet fileprivate weak var gravatarImageView: CircularImageView!
+    @IBOutlet fileprivate weak var titleLabel: UILabel!
+    @IBOutlet fileprivate weak var detailsLabel: UILabel!
 }

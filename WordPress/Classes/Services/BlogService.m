@@ -9,26 +9,21 @@
 #import "PostCategoryService.h"
 #import "CommentService.h"
 #import "PostService.h"
-#import "BlogServiceRemote.h"
-#import "BlogServiceRemoteXMLRPC.h"
-#import "BlogServiceRemoteREST.h"
-#import "AccountServiceRemote.h"
-#import "AccountServiceRemoteREST.h"
-#import "RemoteBlog.h"
-#import "NSString+XMLExtensions.h"
 #import "TodayExtensionService.h"
 #import "ContextManager.h"
 #import "WordPress-Swift.h"
-#import "RemotePostType.h"
 #import "PostType.h"
+@import WordPressKit;
+@import WordPressShared;
 
-NSString *const LastUsedBlogURLDefaultsKey = @"LastUsedBlogURLDefaultsKey";
-NSString *const EditPostViewControllerLastUsedBlogURLOldKey = @"EditPostViewControllerLastUsedBlogURL";
 NSString *const WPComGetFeatures = @"wpcom.getFeatures";
 NSString *const VideopressEnabled = @"videopress_enabled";
 NSString *const WordPressMinimumVersion = @"4.0";
 NSString *const HttpsPrefix = @"https://";
+NSString *const WPBlogUpdatedNotification = @"WPBlogUpdatedNotification";
+
 CGFloat const OneHourInSeconds = 60.0 * 60.0;
+
 
 @implementation BlogService
 
@@ -36,17 +31,6 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
 {
     NSPredicate *predicate = [NSPredicate predicateWithFormat:@"blogID == %@", blogID];
     return [self blogWithPredicate:predicate];
-}
-
-- (void)flagBlogAsLastUsed:(Blog *)blog
-{
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    [defaults setObject:blog.url
-                 forKey:LastUsedBlogURLDefaultsKey];
-    [defaults synchronize];
-    
-    WP3DTouchShortcutCreator *shortcutCreator = [WP3DTouchShortcutCreator new];
-    [shortcutCreator createShortcutsIf3DTouchAvailable:YES];
 }
 
 - (Blog *)lastUsedOrFirstBlog
@@ -85,33 +69,14 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
 - (Blog *)lastUsedBlog
 {
     // Try to get the last used blog, if there is one.
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSString *url = [defaults stringForKey:LastUsedBlogURLDefaultsKey];
-    if (!url) {
-        // Check for the old key and migrate the value if it exists.
-        // TODO: We can probably discard this in the 4.2 release.
-        NSString *oldKey = EditPostViewControllerLastUsedBlogURLOldKey;
-        url = [defaults stringForKey:oldKey];
-        if (url) {
-            [defaults setObject:url
-                         forKey:LastUsedBlogURLDefaultsKey];
-            [defaults removeObjectForKey:oldKey];
-            [defaults synchronize];
-        }
-    }
-
+    RecentSitesService *recentSitesService = [RecentSitesService new];
+    NSString *url = [[recentSitesService recentSites] firstObject];
     if (!url) {
         return nil;
     }
 
     NSPredicate *predicate = [NSPredicate predicateWithFormat:@"visible = YES AND url = %@", url];
     Blog *blog = [self blogWithPredicate:predicate];
-
-    if (!blog) {
-        // Blog might have been removed from the app. Clear the key.
-        [defaults removeObjectForKey:LastUsedBlogURLDefaultsKey];
-        [defaults synchronize];
-    }
 
     return blog;
 }
@@ -180,20 +145,145 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
     }];
 }
 
-- (void)syncOptionsForBlog:(Blog *)blog
-                   success:(void (^)())success
-                   failure:(void (^)(NSError *error))failure
+- (void)fetchSiteInfoForAddress:(NSString *)siteAddress
+                        success:(void (^)(SiteInfo *siteInfo))success
+                        failure:(void (^)(NSError *error))failure
+{
+    WordPressComRestApi *api = [ServiceRemoteWordPressComREST anonymousWordPressComRestApiWithUserAgent:WPUserAgent.wordPressUserAgent];
+
+    BlogServiceRemoteREST *remote = [[BlogServiceRemoteREST alloc] initWithWordPressComRestApi:api siteID:@0];
+    [remote fetchSiteInfoForAddress:siteAddress success:^(NSDictionary *responseDict) {
+        SiteInfo *siteInfo = [[SiteInfo alloc] init];
+        siteInfo.name = [responseDict stringForKey:@"name"] ?: @"";
+        siteInfo.tagline = [responseDict stringForKey:@"description"] ?: @"";
+        siteInfo.url = [responseDict stringForKey:@"URL"] ?: @"";
+        siteInfo.hasJetpack = [[responseDict numberForKey:@"jetpack"] boolValue] ?: NO;
+        siteInfo.icon = [responseDict stringForKeyPath:@"icon.img"] ?: @"";
+        success(siteInfo);
+
+    } failure:^(NSError *error) {
+        failure(error);
+    }];
+}
+
+- (void)syncBlog:(Blog *)blog
+         success:(void (^)())success
+         failure:(void (^)(NSError *error))failure
 {
     id<BlogServiceRemote> remote = [self remoteForBlog:blog];
-    if ([remote respondsToSelector:@selector(syncOptionsWithSuccess:failure:)]) {
-        [remote syncOptionsWithSuccess:[self optionsHandlerWithBlogObjectID:blog.objectID
-                                                          completionHandler:success]
-                               failure:failure];
-    } else if ([remote respondsToSelector:@selector(syncSiteDetailsWithSuccess:failure:)]) {
-        [remote syncSiteDetailsWithSuccess:[self siteDetailsHandlerWithBlogObjectID:blog.objectID
-                                                                  completionHandler:success]
-                                   failure:failure];
+    if ([remote isKindOfClass:[BlogServiceRemoteXMLRPC class]]) {
+        BlogServiceRemoteXMLRPC *xmlrpcRemote = remote;
+        [xmlrpcRemote syncBlogOptionsWithSuccess:[self optionsHandlerWithBlogObjectID:blog.objectID
+                                                                    completionHandler:success]
+                                         failure:failure];
+    } else if ([remote isKindOfClass:[BlogServiceRemoteREST class]]) {
+        BlogServiceRemoteREST *restRemote = remote;
+        [restRemote syncBlogWithSuccess:[self blogDetailsHandlerWithBlogObjectID:blog.objectID
+                                                               completionHandler:success]
+                                failure:failure];
     }
+}
+
+- (void)syncBlogAndAllMetadata:(Blog *)blog completionHandler:(void (^)())completionHandler
+{
+    // Create a dispatch group. We'll use this to monitor completion of the various
+    // remote calls and to execute the completionHandler.
+    dispatch_group_t syncGroup = dispatch_group_create();
+
+    NSManagedObjectID *blogObjectID = blog.objectID;
+    id<BlogServiceRemote> remote = [self remoteForBlog:blog];
+
+    if ([remote isKindOfClass:[BlogServiceRemoteXMLRPC class]]) {
+        dispatch_group_enter(syncGroup);
+        BlogServiceRemoteXMLRPC *xmlrpcRemote = remote;
+        [xmlrpcRemote syncBlogOptionsWithSuccess:[self optionsHandlerWithBlogObjectID:blogObjectID
+                                                                    completionHandler:^{
+                                                                        dispatch_group_leave(syncGroup);
+                                                                    }]
+                                         failure:^(NSError *error) {
+                                             DDLogError(@"Failed syncing options for blog %@: %@", blog.url, error);
+                                             dispatch_group_leave(syncGroup);
+                                         }];
+    }
+
+    if ([remote isKindOfClass:[BlogServiceRemoteREST class]]) {
+        dispatch_group_enter(syncGroup);
+        BlogServiceRemoteREST *restRemote = remote;
+        [restRemote syncBlogWithSuccess:[self blogDetailsHandlerWithBlogObjectID:blogObjectID
+                                                               completionHandler:^{
+                                                                   dispatch_group_leave(syncGroup);
+                                                               }]
+                                failure:^(NSError *error) {
+                                    DDLogError(@"Failed syncing site details for blog %@: %@", blog.url, error);
+                                    dispatch_group_leave(syncGroup);
+                                }];
+
+        dispatch_group_enter(syncGroup);
+        [restRemote syncBlogSettingsWithSuccess:^(RemoteBlogSettings *settings) {
+            [self.managedObjectContext performBlock:^{
+                NSError *error = nil;
+                Blog *blogInContext = (Blog *)[self.managedObjectContext existingObjectWithID:blogObjectID
+                                                                                        error:&error];
+                if (blogInContext) {
+                    [self updateSettings:blogInContext.settings withRemoteSettings:settings];
+                    [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
+                }
+                dispatch_group_leave(syncGroup);
+            }];
+        } failure:^(NSError *error) {
+            DDLogError(@"Failed syncing settings for blog %@: %@", blog.url, error);
+            dispatch_group_leave(syncGroup);
+        }];
+    }
+
+    dispatch_group_enter(syncGroup);
+    [remote syncPostFormatsWithSuccess:[self postFormatsHandlerWithBlogObjectID:blogObjectID
+                                                              completionHandler:^{
+                                                                  dispatch_group_leave(syncGroup);
+                                                              }]
+                               failure:^(NSError *error) {
+                                   DDLogError(@"Failed syncing post formats for blog %@: %@", blog.url, error);
+                                   dispatch_group_leave(syncGroup);
+                               }];
+
+    PostCategoryService *categoryService = [[PostCategoryService alloc] initWithManagedObjectContext:self.managedObjectContext];
+    dispatch_group_enter(syncGroup);
+    [categoryService syncCategoriesForBlog:blog
+                                   success:^{
+                                       dispatch_group_leave(syncGroup);
+                                   }
+                                   failure:^(NSError *error) {
+                                       DDLogError(@"Failed syncing categories for blog %@: %@", blog.url, error);
+                                       dispatch_group_leave(syncGroup);
+                                   }];
+
+    SharingService *sharingService = [[SharingService alloc] initWithManagedObjectContext:self.managedObjectContext];
+    dispatch_group_enter(syncGroup);
+    [sharingService syncPublicizeConnectionsForBlog:blog
+                                            success:^{
+                                                dispatch_group_leave(syncGroup);
+                                            }
+                                            failure:^(NSError *error) {
+                                                DDLogError(@"Failed syncing publicize connections for blog %@: %@", blog.url, error);
+                                                dispatch_group_leave(syncGroup);
+                                            }];
+
+    dispatch_group_enter(syncGroup);
+    [remote getAuthorsWithSuccess:^(NSArray<RemoteUser *> *users) {
+        [self updateMultiAuthor:users forBlog:blogObjectID];
+        dispatch_group_leave(syncGroup);
+    } failure:^(NSError *error) {
+        DDLogError(@"Failed checking muti-author status for blog %@: %@", blog.url, error);
+        dispatch_group_leave(syncGroup);
+    }];
+
+    // When everything has left the syncGroup (all calls have ended with success
+    // or failure) perform the completionHandler
+    dispatch_group_notify(syncGroup, dispatch_get_main_queue(),^{
+        if (completionHandler) {
+            completionHandler();
+        }
+    });
 }
 
 - (void)syncSettingsForBlog:(Blog *)blog
@@ -209,18 +299,32 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
             }
             return;
         }
-        id<BlogServiceRemote> remote = [self remoteForBlog:blogInContext];
-        [remote syncSettingsWithSuccess:^(RemoteBlogSettings *settings) {
+        void(^updateOnSuccess)(RemoteBlogSettings *) = ^(RemoteBlogSettings *remoteSettings) {
             [self.managedObjectContext performBlock:^{
-                [self updateSettings:blogInContext.settings withRemoteSettings:settings];
+                [self updateSettings:blogInContext.settings withRemoteSettings:remoteSettings];
                 [[ContextManager sharedInstance] saveContext:self.managedObjectContext withCompletionBlock:^{
                     if (success) {
                         success();
                     }
                 }];
             }];
+        };
+        id<BlogServiceRemote> remote = [self remoteForBlog:blogInContext];
+        if ([remote isKindOfClass:[BlogServiceRemoteXMLRPC class]]) {
+
+            BlogServiceRemoteXMLRPC *xmlrpcRemote = remote;
+            [xmlrpcRemote syncBlogOptionsWithSuccess:^(NSDictionary *options) {
+                RemoteBlogSettings *remoteSettings = [RemoteBlogOptionsHelper remoteBlogSettingsFromXMLRPCDictionaryOptions:options];
+                updateOnSuccess(remoteSettings);
+            } failure:failure];
+
+        } else if ([remote isKindOfClass:[BlogServiceRemoteREST class]]) {
+
+            BlogServiceRemoteREST *restRemote = remote;
+            [restRemote syncBlogSettingsWithSuccess:^(RemoteBlogSettings *settings) {
+                updateOnSuccess(settings);
+            } failure:failure];
         }
-        failure:failure];
     }];
 }
 
@@ -232,17 +336,32 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
     [self.managedObjectContext performBlock:^{
         Blog *blogInContext = (Blog *)[self.managedObjectContext objectWithID:blogID];
         id<BlogServiceRemote> remote = [self remoteForBlog:blogInContext];
-        [remote updateBlogSettings:[self remoteSettingFromSettings:blogInContext.settings]
-                           success:^() {
-                               [self.managedObjectContext performBlock:^{
-                                   [[ContextManager sharedInstance] saveContext:self.managedObjectContext withCompletionBlock:^{
-                                       if (success) {
-                                           success();
-                                       }
-                                   }];
-                               }];
-                           }
-                           failure:failure];
+
+        void(^saveOnSuccess)() = ^() {
+            [self.managedObjectContext performBlock:^{
+                [[ContextManager sharedInstance] saveContext:self.managedObjectContext withCompletionBlock:^{
+                    if (success) {
+                        success();
+                    }
+                }];
+            }];
+        };
+
+        if ([remote isKindOfClass:[BlogServiceRemoteXMLRPC class]]) {
+
+            BlogServiceRemoteXMLRPC *xmlrpcRemote = remote;
+            RemoteBlogSettings *remoteSettings = [self remoteSettingFromSettings:blogInContext.settings];
+            [xmlrpcRemote updateBlogOptionsWith:[RemoteBlogOptionsHelper remoteOptionsForUpdatingBlogTitleAndTagline:remoteSettings]
+                                        success:saveOnSuccess
+                                        failure:failure];
+
+        } else if([remote isKindOfClass:[BlogServiceRemoteREST class]]) {
+
+            BlogServiceRemoteREST *restRemote = remote;
+            [restRemote updateBlogSettings:[self remoteSettingFromSettings:blogInContext.settings]
+                               success:saveOnSuccess
+                               failure:failure];
+        }
     }];
 }
 
@@ -250,34 +369,6 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
 {
     blog.password = password;
     [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
-}
-
-- (void)migrateJetpackBlogsToXMLRPCWithCompletion:(void (^)())success
-{
-    NSPredicate *predicate = [NSPredicate predicateWithFormat:@"username != NULL AND account != NULL"];
-    NSArray *blogsToMigrate = [self blogsWithPredicate:predicate];
-    for (Blog *blog in blogsToMigrate) {
-        DDLogInfo(@"Migrating %@ with wp.com account %@ to Jetpack XML-RPC", [blog hostURL], blog.account.username);
-        blog.jetpackAccount = blog.account;
-        blog.account = nil;
-    }
-    [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
-    /*
-     We could remove Jetpack blogs directly when we don't have a username for them,
-     but triggering a sync seems safer.
-     */
-    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:self.managedObjectContext];
-    WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-    if (defaultAccount) {
-        /*
-         If this fails, we call success anyway. If the network fails for this request
-         we still want to allow disabling REST. Next time the site list reloads, it'll
-         purge the old Jetpack sites anyway
-         */
-        [self syncBlogsForAccount:accountService.defaultWordPressComAccount success:success failure:success];
-    } else if (success) {
-        success();
-    }
 }
 
 - (void)syncPostTypesForBlog:(Blog *)blog
@@ -327,79 +418,6 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
     [remote syncPostFormatsWithSuccess:[self postFormatsHandlerWithBlogObjectID:blog.objectID
                                                           completionHandler:success]
                                failure:failure];
-}
-
-- (void)syncBlog:(Blog *)blog completionHandler:(void (^)())completionHandler
-{
-    // Create a dispatch group. We'll use this to monitor completion of the various
-    // remote calls and to execute the completionHandler.
-    dispatch_group_t syncGroup = dispatch_group_create();
-
-    NSManagedObjectID *blogObjectID = blog.objectID;
-    id<BlogServiceRemote> remote = [self remoteForBlog:blog];
-
-    if ([remote respondsToSelector:@selector(syncOptionsWithSuccess:failure:)]) {
-        dispatch_group_enter(syncGroup);
-        [remote syncOptionsWithSuccess:[self optionsHandlerWithBlogObjectID:blogObjectID
-                                                          completionHandler:^{
-                                                              dispatch_group_leave(syncGroup);
-                                                          }]
-                               failure:^(NSError *error) {
-                                   DDLogError(@"Failed syncing options for blog %@: %@", blog.url, error);
-                                   dispatch_group_leave(syncGroup);
-                               }];
-    }
-
-    if ([remote respondsToSelector:@selector(syncSiteDetailsWithSuccess:failure:)]) {
-        dispatch_group_enter(syncGroup);
-        [remote syncSiteDetailsWithSuccess:[self siteDetailsHandlerWithBlogObjectID:blogObjectID
-                                                                  completionHandler:^{
-                                                                      dispatch_group_leave(syncGroup);
-                                                                  }]
-                                   failure:^(NSError *error) {
-                                       DDLogError(@"Failed syncing site details for blog %@: %@", blog.url, error);
-                                       dispatch_group_leave(syncGroup);
-                                   }];
-    }
-
-    dispatch_group_enter(syncGroup);
-    [remote syncPostFormatsWithSuccess:[self postFormatsHandlerWithBlogObjectID:blogObjectID
-                                                              completionHandler:^{
-                                                                  dispatch_group_leave(syncGroup);
-                                                              }]
-                               failure:^(NSError *error) {
-                                   DDLogError(@"Failed syncing post formats for blog %@: %@", blog.url, error);
-                                   dispatch_group_leave(syncGroup);
-                               }];
-
-    PostCategoryService *categoryService = [[PostCategoryService alloc] initWithManagedObjectContext:self.managedObjectContext];
-    dispatch_group_enter(syncGroup);
-    [categoryService syncCategoriesForBlog:blog
-                                   success:^{
-                                       dispatch_group_leave(syncGroup);
-                                   }
-                                   failure:^(NSError *error) {
-                                       DDLogError(@"Failed syncing categories for blog %@: %@", blog.url, error);
-                                       dispatch_group_leave(syncGroup);
-                                   }];
-
-    dispatch_group_enter(syncGroup);
-    [remote checkMultiAuthorWithSuccess:^(BOOL isMultiAuthor) {
-        [self updateMultiAuthor:isMultiAuthor forBlog:blogObjectID];
-        dispatch_group_leave(syncGroup);
-
-    } failure:^(NSError *error) {
-        DDLogError(@"Failed checking muti-author status for blog %@: %@", blog.url, error);
-        dispatch_group_leave(syncGroup);
-    }];
-
-    // When everything has left the syncGroup (all calls have ended with success
-    // or failure) perform the completionHandler
-    dispatch_group_notify(syncGroup, dispatch_get_main_queue(),^{
-        if (completionHandler) {
-            completionHandler();
-        }
-    });
 }
 
 - (BOOL)hasVisibleWPComAccounts
@@ -485,6 +503,13 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
 /// @name Blog creation
 ///--------------------
 
+- (Blog *)findBlogWithDotComID:(NSNumber *)dotComID
+                     inAccount:(WPAccount *)account
+{
+    NSPredicate *predicate = [NSPredicate predicateWithFormat:@"dotComID = %@", dotComID];
+    return [[account.blogs filteredSetUsingPredicate:predicate] anyObject];
+}
+
 - (Blog *)findBlogWithXmlrpc:(NSString *)xmlrpc
                    inAccount:(WPAccount *)account
 {
@@ -551,14 +576,14 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
 {
     DDLogInfo(@"<Blog:%@> remove", blog.hostURL);
     [blog.xmlrpcApi invalidateAndCancelTasks];
-    WPAccount *jetpackAccount = blog.jetpackAccount;
+    WPAccount *account = blog.account;
 
     [self.managedObjectContext deleteObject:blog];
     [self.managedObjectContext processPendingChanges];
 
     AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:self.managedObjectContext];
-    if (jetpackAccount) {
-        [accountService purgeAccount:jetpackAccount];
+    if (account) {
+        [accountService purgeAccountIfUnused:account];
     }
 
     [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
@@ -570,8 +595,8 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
 - (void)mergeBlogs:(NSArray<RemoteBlog *> *)blogs withAccount:(WPAccount *)account completion:(void (^)())completion
 {
     // Nuke dead blogs
-    NSSet *remoteSet = [NSSet setWithArray:[blogs valueForKey:@"xmlrpc"]];
-    NSSet *localSet = [account.blogs valueForKey:@"xmlrpc"];
+    NSSet *remoteSet = [NSSet setWithArray:[blogs valueForKey:@"blogID"]];
+    NSSet *localSet = [account.blogs valueForKey:@"dotComID"];
     NSMutableSet *toDelete = [localSet mutableCopy];
     [toDelete minusSet:remoteSet];
 
@@ -598,7 +623,7 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
 
 - (void)updateBlogWithRemoteBlog:(RemoteBlog *)remoteBlog account:(WPAccount *)account
 {
-    Blog *blog = [self findBlogWithXmlrpc:remoteBlog.xmlrpc inAccount:account];
+    Blog *blog = [self findBlogWithDotComID:remoteBlog.blogID inAccount:account];
 
     if (!blog && remoteBlog.jetpack) {
         blog = [self migrateRemoteJetpackBlog:remoteBlog forAccount:account];
@@ -629,11 +654,14 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
     blog.options = remoteBlog.options;
     blog.planID = remoteBlog.planID;
     blog.planTitle = remoteBlog.planTitle;
+    blog.hasPaidPlan = remoteBlog.hasPaidPlan;
 
     // Update 'Top Level' Settings
     BlogSettings *settings = blog.settings;
     settings.name = [remoteBlog.name stringByDecodingXMLCharacters];
     settings.tagline = [remoteBlog.tagline stringByDecodingXMLCharacters];
+    
+    [NSNotificationCenter.defaultCenter postNotificationName:WPBlogUpdatedNotification object:nil];
 }
 
 /**
@@ -654,15 +682,23 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
 - (Blog *)migrateRemoteJetpackBlog:(RemoteBlog *)remoteBlog
                         forAccount:(WPAccount *)account
 {
+    NSURL *xmlrpcURL = [NSURL URLWithString:remoteBlog.xmlrpc];
+    NSURLComponents *components = [NSURLComponents componentsWithURL:xmlrpcURL resolvingAgainstBaseURL:NO];
+    if ([components.scheme isEqualToString:@"https"]) {
+        components.scheme = @"http";
+    } else {
+        components.scheme = @"https";
+    }
+    NSURL *alternateXmlrpcURL = components.URL;
     NSArray *blogsWithNoAccount = [self blogsWithNoAccount];
     Blog *jetpackBlog = [[blogsWithNoAccount wp_filter:^BOOL(Blog *blogToTest) {
-        return [blogToTest.xmlrpc isEqualToString:remoteBlog.xmlrpc] && [blogToTest.dotComID isEqual:remoteBlog.blogID];
+        return [blogToTest.xmlrpc caseInsensitiveCompare:xmlrpcURL.absoluteString] == NSOrderedSame
+        || [blogToTest.xmlrpc caseInsensitiveCompare:alternateXmlrpcURL.absoluteString] == NSOrderedSame;
     }] firstObject];
 
     if (jetpackBlog) {
         DDLogInfo(@"Migrating %@ to wp.com account %@", [jetpackBlog hostURL], account.username);
         jetpackBlog.account = account;
-        jetpackBlog.jetpackAccount = nil;
     }
 
     return jetpackBlog;
@@ -770,7 +806,7 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
 
 #pragma mark - Completion handlers
 
-- (void)updateMultiAuthor:(BOOL)isMultiAuthor forBlog:(NSManagedObjectID *)blogObjectID
+- (void)updateMultiAuthor:(NSArray<RemoteUser *> *)users forBlog:(NSManagedObjectID *)blogObjectID
 {
     [self.managedObjectContext performBlock:^{
         NSError *error;
@@ -781,12 +817,35 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
         if (!blog) {
             return;
         }
-        blog.isMultiAuthor = isMultiAuthor;
+        blog.isMultiAuthor = users.count > 1;
+        /// Search for a matching user ID
+        /// - wp.com hosted: blog.account.userID
+        /// - Jetpack: user.linkedUserID == blog.account.userID
+        /// - self hosted: user.username == blog.username
+        if (blog.account) {
+            if ([blog isHostedAtWPcom]) {
+                blog.userID = blog.account.userID;
+            } else {
+                for (RemoteUser *user in users) {
+                    if ([user.linkedUserID isEqual:blog.account.userID]) {
+                        blog.userID = user.userID;
+                        break;
+                    }
+                }
+            }
+        } else if (blog.username != nil) {
+            for (RemoteUser *user in users) {
+                if ([user.username isEqualToString:blog.username]) {
+                    blog.userID = user.userID;
+                    break;
+                }
+            }
+        }
         [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
     }];
 }
 
-- (SiteDetailsHandler)siteDetailsHandlerWithBlogObjectID:(NSManagedObjectID *)blogObjectID
+- (BlogDetailsHandler)blogDetailsHandlerWithBlogObjectID:(NSManagedObjectID *)blogObjectID
                                        completionHandler:(void (^)(void))completion
 {
     return ^void(RemoteBlog *remoteBlog) {
@@ -821,6 +880,9 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
                 return;
             }
             blog.options = [NSDictionary dictionaryWithDictionary:options];
+
+            RemoteBlogSettings *remoteSettings = [RemoteBlogOptionsHelper remoteBlogSettingsFromXMLRPCDictionaryOptions:options];
+            [self updateSettings:blog.settings withRemoteSettings:remoteSettings];
 
             // NOTE: `[blog version]` can return nil. If this happens `version` will be `0`
             CGFloat version = [[blog version] floatValue];
@@ -907,6 +969,7 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
     settings.tagline = remoteSettings.tagline;
     settings.privacy = remoteSettings.privacy ?: settings.privacy;
     settings.languageID = remoteSettings.languageID ?: settings.languageID;
+    settings.iconMediaID = remoteSettings.iconMediaID;
     
     // Writing
     settings.defaultCategoryID = remoteSettings.defaultCategoryID ?: settings.defaultCategoryID;
@@ -966,6 +1029,7 @@ CGFloat const OneHourInSeconds = 60.0 * 60.0;
     remoteSettings.tagline = settings.tagline;
     remoteSettings.privacy = settings.privacy;
     remoteSettings.languageID = settings.languageID;
+    remoteSettings.iconMediaID = settings.iconMediaID;
     
     // Writing
     remoteSettings.defaultCategoryID = settings.defaultCategoryID;

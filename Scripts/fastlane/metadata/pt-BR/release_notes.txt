@@ -1,0 +1,2 @@
+Sites Jetpack: adicionado suporte a funções personalizadas.
+Várias pequenas melhorias e correções de erros.

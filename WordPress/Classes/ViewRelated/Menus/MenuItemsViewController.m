@@ -1,15 +1,15 @@
 #import "MenuItemsViewController.h"
 #import "Menu.h"
 #import "MenuItem.h"
-#import "WPStyleGuide.h"
 #import "MenuItemAbstractView.h"
 #import "MenuItemView.h"
 #import "MenuItemInsertionView.h"
 #import "MenuItemsVisualOrderingView.h"
 #import "ContextManager.h"
 #import "Menu+ViewDesign.h"
-#import <WordPressShared/WPDeviceIdentification.h>
 #import "WPGUIConstants.h"
+#import <WordPressShared/WPDeviceIdentification.h>
+#import <WordPressShared/WPStyleGuide.h>
 
 static CGFloat const ItemHoriztonalDragDetectionWidthRatio = 0.05;
 static CGFloat const ItemOrderingTouchesDetectionInset = 10.0;
@@ -32,6 +32,8 @@ static CGFloat const ItemOrderingTouchesDetectionInset = 10.0;
 
 @property (nonatomic, strong) MenuItemView *itemViewForOrdering;
 @property (nonatomic, strong, readonly) MenuItemsVisualOrderingView *visualOrderingView;
+
+@property (nonatomic, strong) UISelectionFeedbackGenerator *orderingFeedbackGenerator;
 
 @end
 
@@ -321,6 +323,8 @@ static CGFloat const ItemOrderingTouchesDetectionInset = 10.0;
 
 - (void)updateWithTouchesStarted:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
 {
+    [self prepareOrderingFeedbackGenerator];
+
     CGPoint location = [[touches anyObject] locationInView:self.view];
 
     self.touchesBeganLocation = location;
@@ -414,6 +418,11 @@ static CGFloat const ItemOrderingTouchesDetectionInset = 10.0;
         self.showingTouchesOrdering = YES;
         [self showVisualOrderingView];
         [self toggleOrderingPlaceHolder:YES forItemViewsWithSelectedItemView:self.itemViewForOrdering];
+
+        // Apple's documentation says not to trigger on initial selection,
+        // but the built-in taptics for UITableView *does* trigger when you first
+        // start reordering. So, let's match that behavior.
+        [self triggerOrderingFeedbackGenerator];
     }
 }
 
@@ -431,6 +440,7 @@ static CGFloat const ItemOrderingTouchesDetectionInset = 10.0;
     [self hideOrdering];
     self.itemViewForOrdering = nil;
     [self.delegate itemsViewController:self prefersScrollingEnabled:YES];
+    [self cleanUpOrderingFeedbackGenerator];
 }
 
 - (void)orderingTouchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event vector:(CGPoint)vector
@@ -530,6 +540,7 @@ static CGFloat const ItemOrderingTouchesDetectionInset = 10.0;
     // update the views based on the model changes
     if (modelUpdated) {
         [self updateParentChildIndentationForItemViews];
+        [self triggerOrderingFeedbackGenerator];
         [self.visualOrderingView updateForVisualOrderingMenuItemsModelChange];
         [self.delegate itemsViewController:self didUpdateMenuItemsOrdering:self.menu];
     }
@@ -779,6 +790,9 @@ static CGFloat const ItemOrderingTouchesDetectionInset = 10.0;
 
 - (void)itemViewSelected:(MenuItemView *)itemView
 {
+    if (self.isEditingForItemViewInsertion) {
+        [self removeItemInsertionViews:YES];
+    }
     [self.delegate itemsViewController:self selectedItemForEditing:itemView.item];
 }
 
@@ -862,6 +876,25 @@ static CGFloat const ItemOrderingTouchesDetectionInset = 10.0;
         // Inform the delegate to begin editing the new item.
         [self.delegate itemsViewController:self createdNewItemForEditing:newItem];
     });
+}
+
+#pragma mark - Ordering Taptic Feedback
+
+- (void)prepareOrderingFeedbackGenerator
+{
+    self.orderingFeedbackGenerator = [UISelectionFeedbackGenerator new];
+    [self.orderingFeedbackGenerator prepare];
+}
+
+- (void)triggerOrderingFeedbackGenerator
+{
+    [self.orderingFeedbackGenerator selectionChanged];
+    [self.orderingFeedbackGenerator prepare];
+}
+
+- (void)cleanUpOrderingFeedbackGenerator
+{
+    self.orderingFeedbackGenerator = nil;
 }
 
 @end

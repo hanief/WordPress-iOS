@@ -1,11 +1,6 @@
 #import "WPLogger.h"
 
-// Pods
-#import <CocoaLumberjack/CocoaLumberjack.h>
-#import <CocoaLumberjack/DDASLLogger.h>
-#import <CocoaLumberjack/DDFileLogger.h>
-#import <CocoaLumberjack/DDTTYLogger.h>
-
+@import CocoaLumberjack;
 #import "WPCrashlyticsLogger.h"
 
 @interface WPLogger ()
@@ -43,11 +38,10 @@
     
     // Sets up the CocoaLumberjack logging; debug output to console and file
 #ifdef DEBUG
-    [DDLog addLogger:[DDASLLogger sharedInstance]];
     [DDLog addLogger:[DDTTYLogger sharedInstance]];
 #endif
     
-#if !defined(INTERNAL_BUILD) && !defined(DEBUG)
+#ifndef DEBUG
     [DDLog addLogger:[WPCrashlyticsLogger sharedInstance]];
 #endif
     

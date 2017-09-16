@@ -1,27 +1,28 @@
 import UIKit
+import CocoaLumberjack
 
 
 @objc protocol WPContentSyncHelperDelegate: NSObjectProtocol {
-    func syncHelper(syncHelper:WPContentSyncHelper, syncContentWithUserInteraction userInteraction: Bool, success: ((hasMore: Bool) -> Void)?, failure: ((error: NSError) -> Void)?)
-    func syncHelper(syncHelper:WPContentSyncHelper, syncMoreWithSuccess success: ((hasMore: Bool) -> Void)?, failure: ((error: NSError) -> Void)?)
-    optional func syncContentEnded()
-    optional func syncContentFailed()
-    optional func hasNoMoreContent()
+    func syncHelper(_ syncHelper: WPContentSyncHelper, syncContentWithUserInteraction userInteraction: Bool, success: ((_ hasMore: Bool) -> Void)?, failure: ((_ error: NSError) -> Void)?)
+    func syncHelper(_ syncHelper: WPContentSyncHelper, syncMoreWithSuccess success: ((_ hasMore: Bool) -> Void)?, failure: ((_ error: NSError) -> Void)?)
+    @objc optional func syncContentEnded(_ syncHelper: WPContentSyncHelper)
+    @objc optional func syncContentFailed(_ syncHelper: WPContentSyncHelper)
+    @objc optional func hasNoMoreContent(_ syncHelper: WPContentSyncHelper)
 }
 
 
 class WPContentSyncHelper: NSObject {
 
     weak var delegate: WPContentSyncHelperDelegate?
-    var isSyncing:Bool = false
-    var isLoadingMore:Bool = false
-    var hasMoreContent:Bool = true {
+    var isSyncing: Bool = false
+    var isLoadingMore: Bool = false
+    var hasMoreContent: Bool = true {
         didSet {
             if hasMoreContent == oldValue {
                 return
             }
             if hasMoreContent == false {
-                delegate?.hasNoMoreContent?()
+                delegate?.hasNoMoreContent?(self)
             }
         }
     }
@@ -29,17 +30,17 @@ class WPContentSyncHelper: NSObject {
 
     // MARK: - Syncing
 
-    func syncContent() -> Bool {
+    @discardableResult func syncContent() -> Bool {
         return syncContentWithUserInteraction(false)
     }
 
 
-    func syncContentWithUserInteraction() -> Bool {
+    @discardableResult func syncContentWithUserInteraction() -> Bool {
         return syncContentWithUserInteraction(true)
     }
 
 
-    func syncContentWithUserInteraction(userInteraction:Bool) -> Bool {
+    @discardableResult func syncContentWithUserInteraction(_ userInteraction: Bool) -> Bool {
         if isSyncing {
             return false
         }
@@ -55,7 +56,7 @@ class WPContentSyncHelper: NSObject {
         }, failure: {
             [weak self] (error: NSError) -> Void in
             if let weakSelf = self {
-                weakSelf.syncContentEnded()
+                weakSelf.syncContentEnded(error: true)
             }
         })
 
@@ -63,7 +64,7 @@ class WPContentSyncHelper: NSObject {
     }
 
 
-    func syncMoreContent() -> Bool {
+    @discardableResult func syncMoreContent() -> Bool {
         if isSyncing {
             return false
         }
@@ -79,7 +80,7 @@ class WPContentSyncHelper: NSObject {
             }
         }, failure: {
             [weak self] (error: NSError) in
-            DDLogSwift.logInfo("Error syncing more: \(error)")
+            DDLogInfo("Error syncing more: \(error)")
             if let weakSelf = self {
                 weakSelf.syncContentEnded(error: true)
             }
@@ -88,17 +89,40 @@ class WPContentSyncHelper: NSObject {
         return true
     }
 
+    func backgroundSync(success: (() -> Void)?, failure: ((_ error: NSError?) -> Void)?) {
+        if isSyncing {
+            success?()
+            return
+        }
+
+        isSyncing = true
+
+        delegate?.syncHelper(self, syncContentWithUserInteraction: false, success: {
+                [weak self] (hasMore: Bool) -> Void in
+                if let weakSelf = self {
+                    weakSelf.hasMoreContent = hasMore
+                    weakSelf.syncContentEnded()
+                }
+                success?()
+            }, failure: {
+                [weak self] (error: NSError) -> Void in
+                if let weakSelf = self {
+                    weakSelf.syncContentEnded()
+                }
+                failure?(error)
+        })
+    }
 
     // MARK: - Private Methods
 
-    private func syncContentEnded(error error: Bool = false) {
+    fileprivate func syncContentEnded(error: Bool = false) {
         isSyncing = false
         isLoadingMore = false
 
         if error {
-            delegate?.syncContentFailed?()
+            delegate?.syncContentFailed?(self)
         } else {
-            delegate?.syncContentEnded?()
+            delegate?.syncContentEnded?(self)
         }
     }
 

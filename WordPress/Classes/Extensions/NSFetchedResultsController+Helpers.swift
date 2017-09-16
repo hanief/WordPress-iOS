@@ -1,11 +1,10 @@
 import Foundation
 
 
-extension NSFetchedResultsController
-{
+extension NSFetchedResultsController {
     /// Returns whether an indexPath represents the last row in it's section, or not
     ///
-    func isLastIndexPathInSection(indexPath: NSIndexPath) -> Bool {
+    func isLastIndexPathInSection(_ indexPath: IndexPath) -> Bool {
         guard let sections = sections else {
             return false
         }
@@ -17,10 +16,10 @@ extension NSFetchedResultsController
         return indexPath.row == sections[indexPath.section].numberOfObjects - 1
     }
 
-
-    /// Returns an object of the specified type. Nil if the indexPath is out of bounds.
+    /// Returns the NSManagedObject at the specified indexPath, if the Row + Section are still valid.
+    /// Otherwise, null will be returned.
     ///
-    func objectOfType<T : NSManagedObject>(type: T.Type, atIndexPath indexPath: NSIndexPath) -> T? {
+    func managedObject(atUnsafe indexPath: IndexPath) -> NSManagedObject? {
         guard let sections = sections else {
             return nil
         }
@@ -29,10 +28,10 @@ extension NSFetchedResultsController
             return nil
         }
 
-        guard indexPath.row < sections[indexPath.section].numberOfObjects else {
+        guard indexPath.row < sections[indexPath.section].numberOfObjects && indexPath.row >= 0 else {
             return nil
         }
 
-        return objectAtIndexPath(indexPath) as? T
+        return object(at: indexPath) as? NSManagedObject
     }
 }

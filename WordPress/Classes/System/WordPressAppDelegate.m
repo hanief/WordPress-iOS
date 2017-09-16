@@ -9,7 +9,6 @@
 #import <Reachability/Reachability.h>
 #import <SVProgressHUD/SVProgressHUD.h>
 #import <UIDeviceIdentifier/UIDeviceHardware.h>
-#import <WordPress_AppbotX/ABX.h>
 #import <WordPressShared/UIImage+Util.h>
 
 #ifdef BUDDYBUILD_ENABLED
@@ -22,9 +21,6 @@
 #import "WPCrashlytics.h"
 
 // Categories & extensions
-#import "NSBundle+VersionNumberHelper.h"
-#import "NSString+Helpers.h"
-#import "UIDevice+Helpers.h"
 
 // Data model
 #import "Blog.h"
@@ -37,11 +33,9 @@
 #import "WPLogger.h"
 
 // Misc managers, helpers, utilities
-#import "AppRatingUtility.h"
 #import "ContextManager.h"
 #import "HelpshiftUtils.h"
 #import "HockeyManager.h"
-#import "WPLookbackPresenter.h"
 #import "TodayExtensionService.h"
 #import "WPAuthTokenIssueSolver.h"
 
@@ -68,12 +62,13 @@ int ddLogLevel = DDLogLevelInfo;
 @property (nonatomic, strong, readwrite) WPAppAnalytics                 *analytics;
 @property (nonatomic, strong, readwrite) WPCrashlytics                  *crashlytics;
 @property (nonatomic, strong, readwrite) WPLogger                       *logger;
-@property (nonatomic, strong, readwrite) WPLookbackPresenter            *lookbackPresenter;
 @property (nonatomic, strong, readwrite) Reachability                   *internetReachability;
 @property (nonatomic, strong, readwrite) HockeyManager                  *hockey;
 @property (nonatomic, assign, readwrite) UIBackgroundTaskIdentifier     bgTask;
 @property (nonatomic, assign, readwrite) BOOL                           connectionAvailable;
 @property (nonatomic, assign, readwrite) BOOL                           shouldRestoreApplicationState;
+@property (nonatomic, strong, readwrite) PingHubManager                 *pinghubManager;
+@property (nonatomic, strong, readwrite) WP3DTouchShortcutCreator       *shortcutCreator;
 
 @end
 
@@ -93,6 +88,8 @@ int ddLogLevel = DDLogLevelInfo;
 
 - (BOOL)application:(UIApplication *)application willFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
+    self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+
     [WordPressAppDelegate fixKeychainAccess];
 
     // Basic networking setup
@@ -114,55 +111,38 @@ int ddLogLevel = DDLogLevelInfo;
 
     self.shouldRestoreApplicationState = !isFixingAuthTokenIssue;
 
+    // Temporary force of Aztec to "on" for all internal users
+#ifdef INTERNAL_BUILD
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *defaultsKey = @"AztecInternalForcedOnVersion";
+    NSString *lastBuildAztecForcedOn = [defaults stringForKey:defaultsKey];
+    NSString *currentVersion = [[NSBundle mainBundle] bundleVersion];
+    if (![currentVersion isEqualToString:lastBuildAztecForcedOn]) {
+        [defaults setObject:currentVersion forKey:defaultsKey];
+        [defaults synchronize];
+
+        EditorSettings *settings = [EditorSettings new];
+        [settings setVisualEditorEnabled:TRUE];
+        [settings setNativeEditorEnabled:TRUE];
+    }
+#endif
+
     return YES;
 }
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
     DDLogVerbose(@"didFinishLaunchingWithOptions state: %d", application.applicationState);
-    [self.window makeKeyAndVisible];
 
     [[InteractiveNotificationsManager sharedInstance] registerForUserNotifications];
     [self showWelcomeScreenIfNeededAnimated:NO];
-    [self setupLookback];
-    [self setupAppbotX];
     [self setupStoreKit];
     [self setupBuddyBuild];
+    [self setupPingHub];
+    [self setupShortcutCreator];
+    [self setupBackgroundRefresh:application];
 
     return YES;
-}
-
-- (void)setupLookback
-{
-#ifdef LOOKBACK_ENABLED
-    // Kick this off on a background thread so as to not slow down the app initialization
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-        
-        NSString *lookbackToken = [ApiCredentials lookbackToken];
-        
-        if ([lookbackToken length] > 0) {
-            UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-
-            NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-            
-            [context performBlock:^{
-                AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
-                WPAccount *account = [accountService defaultWordPressComAccount];
-
-                self.lookbackPresenter = [[WPLookbackPresenter alloc] initWithToken:lookbackToken
-                                                                             userId:account.username
-                                                                             window:keyWindow];
-            }];
-        }
-    });
-#endif
-}
-
-- (void)setupAppbotX
-{
-    if ([ApiCredentials appbotXAPIKey].length > 0) {
-        [[ABXApiClient instance] setApiKey:[ApiCredentials appbotXAPIKey]];
-    }
 }
 
 - (void)setupStoreKit
@@ -189,6 +169,20 @@ int ddLogLevel = DDLogLevelInfo;
     
     [BuddyBuildSDK setup];
 #endif
+}
+
+- (void)setupPingHub
+{
+    self.pinghubManager = [PingHubManager new];
+}
+
+- (void)setupShortcutCreator
+{
+    self.shortcutCreator = [WP3DTouchShortcutCreator new];
+}
+
+- (void)setupBackgroundRefresh:(UIApplication *)application {
+    [application setMinimumBackgroundFetchInterval:UIApplicationBackgroundFetchIntervalMinimum];
 }
 
 - (BOOL)application:(UIApplication *)app openURL:(NSURL *)url options:(NSDictionary<NSString *,id> *)options
@@ -371,6 +365,12 @@ int ddLogLevel = DDLogLevelInfo;
     completionHandler([shortcutHandler handleShortcutItem:shortcutItem]);
 }
 
+- (UIViewController *)application:(UIApplication *)application viewControllerWithRestorationIdentifierPath:(NSArray *)identifierComponents coder:(NSCoder *)coder
+{
+    NSString *restoreID = [identifierComponents lastObject];
+    return [[Restorer new] viewControllerWithIdentifier:restoreID];
+}
+
 #pragma mark - Application startup
 
 - (void)runStartupSequenceWithLaunchOptions:(NSDictionary *)launchOptions
@@ -398,11 +398,11 @@ int ddLogLevel = DDLogLevelInfo;
     [[AFNetworkActivityIndicatorManager sharedManager] setEnabled:YES];
     [WPUserAgent useWordPressUserAgentInUIWebViews];
 
-    // WORKAROUND: Preload the Merriweather regular font to ensure it is not overridden
-    // by any of the Merriweather varients.  Size is arbitrary.
+    // WORKAROUND: Preload the Noto regular font to ensure it is not overridden
+    // by any of the Noto varients.  Size is arbitrary.
     // See: https://github.com/wordpress-mobile/WordPress-Shared-iOS/issues/79
     // Remove this when #79 is resolved.
-    [WPFontManager merriweatherRegularFontOfSize:16.0];
+    [WPFontManager notoRegularFontOfSize:16.0];
 
     [self customizeAppearance];
 
@@ -413,11 +413,13 @@ int ddLogLevel = DDLogLevelInfo;
     
     // Deferred tasks to speed up app launch
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-        [MediaService cleanUnusedMediaFileFromTmpDir];
+        [MediaFileManager clearUnusedMediaUploadFilesOnCompletion:nil onError:nil];
     });
     
     // Configure Extensions
     [self setupWordPressExtensions];
+
+    [self.shortcutCreator createShortcutsIf3DTouchAvailable:[self isLoggedIn]];
     
     self.window.rootViewController = [WPTabBarController sharedInstance];
 }
@@ -448,14 +450,23 @@ int ddLogLevel = DDLogLevelInfo;
     [[PushNotificationsManager sharedInstance] handleNotification:userInfo completionHandler:completionHandler];
 }
 
-- (void)application:(UIApplication *)application handleActionWithIdentifier:(NSString *)identifier
-                                        forRemoteNotification:(NSDictionary *)remoteNotification
-                                             withResponseInfo:(NSDictionary *)responseInfo
-                                            completionHandler:(void (^)())completionHandler
+#pragma mark - Background Refresh
+
+- (void)application:(UIApplication *)application performFetchWithCompletionHandler:(void (^)(UIBackgroundFetchResult result))completionHandler
 {
-    NSString *responseText = responseInfo[UIUserNotificationActionResponseTypedTextKey];
-    [[InteractiveNotificationsManager sharedInstance] handleActionWithIdentifier:identifier remoteNotification:remoteNotification responseText:responseText];
-    completionHandler();
+    WPTabBarController *tabBarController = [WPTabBarController sharedInstance];
+    ReaderMenuViewController *readerMenuVC = tabBarController.readerMenuViewController;
+    if (readerMenuVC.currentReaderStream) {
+        [readerMenuVC.currentReaderStream backgroundFetch:completionHandler];
+    } else {
+        completionHandler(UIBackgroundFetchResultNoData);
+    }
+}
+
+- (BOOL)runningInBackground
+{
+    UIApplicationState state = [UIApplication sharedApplication].applicationState;
+    return state == UIApplicationStateBackground;
 }
 
 #pragma mark - Custom methods
@@ -485,7 +496,7 @@ int ddLogLevel = DDLogLevelInfo;
 
 - (void)showWelcomeScreenAnimated:(BOOL)animated thenEditor:(BOOL)thenEditor
 {
-    [SigninHelpers showSigninFromPresenter:self.window.rootViewController animated:animated thenEditor:thenEditor];
+    [SigninHelpers showLoginFromPresenter:self.window.rootViewController animated:animated thenEditor:thenEditor];
 }
 
 - (BOOL)isWelcomeScreenVisible
@@ -499,7 +510,8 @@ int ddLogLevel = DDLogLevelInfo;
         return YES;
     }
 
-    return [presentedViewController.visibleViewController isKindOfClass:[NUXAbstractViewController class]];
+    UIViewController *controller = presentedViewController.visibleViewController;
+    return [controller isKindOfClass:[NUXAbstractViewController class]] || [controller isKindOfClass:[LoginPrologueViewController class]];
 }
 
 - (BOOL)noWordPressDotComAccount
@@ -531,8 +543,6 @@ int ddLogLevel = DDLogLevelInfo;
     [[UITabBar appearance] setShadowImage:[UIImage imageWithColor:[UIColor colorWithRed:210.0/255.0 green:222.0/255.0 blue:230.0/255.0 alpha:1.0]]];
     [[UITabBar appearance] setTintColor:[WPStyleGuide newKidOnTheBlockBlue]];
 
-    [[UINavigationBar appearance] setTitleTextAttributes:@{NSForegroundColorAttributeName: [UIColor whiteColor], NSFontAttributeName: [WPFontManager systemBoldFontOfSize:17.0]} ];
-
     [[UINavigationBar appearance] setBackgroundImage:[WPStyleGuide navigationBarBackgroundImage] forBarMetrics:UIBarMetricsDefault];
     [[UINavigationBar appearance] setShadowImage:[WPStyleGuide navigationBarShadowImage]];
     [[UINavigationBar appearance] setBarStyle:[WPStyleGuide navigationBarBarStyle]];
@@ -540,7 +550,7 @@ int ddLogLevel = DDLogLevelInfo;
     [[UIBarButtonItem appearance] setTintColor:[UIColor whiteColor]];
     [[UIBarButtonItem appearance] setTitleTextAttributes:@{NSFontAttributeName: [WPFontManager systemRegularFontOfSize:17.0], NSForegroundColorAttributeName: [UIColor whiteColor]} forState:UIControlStateNormal];
     [[UIBarButtonItem appearance] setTitleTextAttributes:@{NSFontAttributeName: [WPFontManager systemRegularFontOfSize:17.0], NSForegroundColorAttributeName: [UIColor colorWithWhite:1.0 alpha:0.25]} forState:UIControlStateDisabled];
-    
+
     [[UISegmentedControl appearance] setTitleTextAttributes:@{NSFontAttributeName: [WPStyleGuide regularTextFont]} forState:UIControlStateNormal];
     [[UIToolbar appearance] setBarTintColor:[WPStyleGuide wordPressBlue]];
     [[UISwitch appearance] setOnTintColor:[WPStyleGuide wordPressBlue]];
@@ -554,12 +564,11 @@ int ddLogLevel = DDLogLevelInfo;
     [[UIToolbar appearanceWhenContainedInInstancesOfClasses:@[ [WPEditorViewController class] ]] setBarTintColor:[UIColor whiteColor]];
 
     // Search
-    [WPStyleGuide configureSearchAppearance];
+    [WPStyleGuide configureSearchBarAppearance];
 
     // SVProgressHUD styles
     [SVProgressHUD setBackgroundColor:[[WPStyleGuide littleEddieGrey] colorWithAlphaComponent:0.95]];
     [SVProgressHUD setForegroundColor:[UIColor whiteColor]];
-    [SVProgressHUD setFont:[WPFontManager systemRegularFontOfSize:18.0]];
     [SVProgressHUD setErrorImage:[UIImage imageNamed:@"hud_error"]];
     [SVProgressHUD setSuccessImage:[UIImage imageNamed:@"hud_success"]];
     
@@ -568,17 +577,25 @@ int ddLogLevel = DDLogLevelInfo;
     [barButtonItem setTitleTextAttributes:@{NSForegroundColorAttributeName: [UIColor whiteColor], NSFontAttributeName : [WPFontManager systemSemiBoldFontOfSize:16.0]} forState:UIControlStateNormal];
     [barButtonItem setTitleTextAttributes:@{NSForegroundColorAttributeName: [UIColor whiteColor], NSFontAttributeName : [WPFontManager systemSemiBoldFontOfSize:16.0]} forState:UIControlStateDisabled];
     [[UICollectionView appearanceWhenContainedInInstancesOfClasses:@[ [WPMediaPickerViewController class] ]] setBackgroundColor:[WPStyleGuide greyLighten30]];
-    [[WPMediaCollectionViewCell appearanceWhenContainedInInstancesOfClasses:@[ [WPMediaCollectionViewController class] ]] setBackgroundColor:[WPStyleGuide lightGrey]];
+
+    [[WPMediaCollectionViewCell appearanceWhenContainedInInstancesOfClasses:@[ [WPMediaPickerViewController class] ]] setBackgroundColor:[WPStyleGuide lightGrey]];
+    [[WPMediaCollectionViewCell appearanceWhenContainedInInstancesOfClasses:@[ [WPMediaPickerViewController class] ]] setCellTintColor:[WPStyleGuide wordPressBlue]];
 
     [[WPLegacyEditorFormatToolbar appearance] setBarTintColor:[UIColor colorWithHexString:@"F9FBFC"]];
     [[WPLegacyEditorFormatToolbar appearance] setTintColor:[WPStyleGuide greyLighten10]];
     [[UIBarButtonItem appearanceWhenContainedInInstancesOfClasses:@[[WPLegacyEditorFormatToolbar class]]] setTintColor:[WPStyleGuide greyLighten10]];
+
+    // Customize the appearence of the text elements
+    [self customizeAppearanceForTextElements];
 }
 
-- (void)create3DTouchShortcutItems
+- (void)customizeAppearanceForTextElements
 {
-    WP3DTouchShortcutCreator *shortcutCreator = [WP3DTouchShortcutCreator new];
-    [shortcutCreator createShortcutsIf3DTouchAvailable:[self isLoggedIn]];
+    [[UINavigationBar appearance] setTitleTextAttributes:@{NSForegroundColorAttributeName: [UIColor whiteColor], NSFontAttributeName: [WPStyleGuide fontForTextStyle:UIFontTextStyleHeadline symbolicTraits:UIFontDescriptorTraitBold]} ];
+    // Search
+    [WPStyleGuide configureSearchBarTextAppearance];
+    // SVProgressHUD styles
+    [SVProgressHUD setFont:[WPStyleGuide fontForTextStyle:UIFontTextStyleHeadline]];
 }
 
 #pragma mark - Analytics
@@ -595,12 +612,13 @@ int ddLogLevel = DDLogLevelInfo;
 #pragma mark - App Rating
 
 - (void)initializeAppRatingUtility
-{    
+{
+    AppRatingUtility *utility = [AppRatingUtility shared];
     NSString *version = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"];
-    [AppRatingUtility registerSection:@"notifications" withSignificantEventCount:5];
-    [AppRatingUtility setSystemWideSignificantEventsCount:10];
-    [AppRatingUtility initializeForVersion:version];
-    [AppRatingUtility checkIfAppReviewPromptsHaveBeenDisabled:nil failure:^{
+    [utility registerSection:@"notifications" withSignificantEventCount:5];
+    utility.systemWideSignificantEventCountRequiredForPrompt = 10;
+    [utility setVersion:version];
+    [utility checkIfAppReviewPromptsHaveBeenDisabledWithSuccess:nil failure:^{
         DDLogError(@"Was unable to retrieve data about throttling");
     }];
 }
@@ -609,7 +627,7 @@ int ddLogLevel = DDLogLevelInfo;
 
 - (void)configureCrashlytics
 {
-#if defined(INTERNAL_BUILD) || defined(DEBUG)
+#if defined(DEBUG)
     return;
 #endif
 
@@ -718,8 +736,11 @@ int ddLogLevel = DDLogLevelInfo;
     NSArray *languages = [[NSUserDefaults standardUserDefaults] objectForKey:@"AppleLanguages"];
     NSString *currentLanguage = [languages objectAtIndex:0];
     BOOL extraDebug = [[NSUserDefaults standardUserDefaults] boolForKey:@"extra_debug"];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]];
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
     NSArray *blogs = [blogService blogsForAllAccounts];
+    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
+    WPAccount *account = [accountService defaultWordPressComAccount];
     
     DDLogInfo(@"===========================================================================");
     DDLogInfo(@"Launching WordPress for iOS %@...", [[NSBundle bundleForClass:[self class]] detailedVersionNumber]);
@@ -736,6 +757,11 @@ int ddLogLevel = DDLogLevelInfo;
     DDLogInfo(@"UDID:      %@", device.wordPressIdentifier);
     DDLogInfo(@"APN token: %@", [[PushNotificationsManager sharedInstance] deviceToken]);
     DDLogInfo(@"Launch options: %@", launchOptions);
+    NSString *verificationTag = @"";
+    if (account.verificationStatus) {
+        verificationTag = [NSString stringWithFormat:@" (%@)", account.verificationStatus];
+    }
+    DDLogInfo(@"wp.com account: %@ (ID: %@)%@", account.username, account.userID, verificationTag);
     
     if (blogs.count > 0) {
         DDLogInfo(@"All blogs on device:");
@@ -812,6 +838,11 @@ int ddLogLevel = DDLogLevelInfo;
                            selector:@selector(handleLowMemoryWarningNote:)
                                name:UIApplicationDidReceiveMemoryWarningNotification
                              object:nil];
+
+    [notificationCenter addObserver:self
+                           selector:@selector(handleUIContentSizeCategoryDidChangeNotification:)
+                               name:UIContentSizeCategoryDidChangeNotification
+                             object:nil];
 }
 
 - (void)handleDefaultAccountChangedNote:(NSNotification *)notification
@@ -828,8 +859,7 @@ int ddLogLevel = DDLogLevelInfo;
         [self removeShareExtensionConfiguration];
         [self showWelcomeScreenIfNeededAnimated:NO];
     }
-    
-    [self create3DTouchShortcutItems];
+
     [self toggleExtraDebuggingIfNeeded];
     
     [WPAnalytics track:WPAnalyticsStatDefaultAccountChanged];
@@ -840,6 +870,10 @@ int ddLogLevel = DDLogLevelInfo;
     [WPAnalytics track:WPAnalyticsStatLowMemoryWarning];
 }
 
+- (void)handleUIContentSizeCategoryDidChangeNotification:(NSNotification *)notification
+{
+    [self customizeAppearanceForTextElements];
+}
 
 #pragma mark - Extensions
 

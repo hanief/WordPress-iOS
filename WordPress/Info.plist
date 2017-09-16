@@ -2,8 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
@@ -19,7 +17,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>6.7</string>
+	<string>8.4</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleURLTypes</key>
@@ -37,7 +35,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>6.7.0.2</string>
+	<string>8.4.0.3</string>
 	<key>Fabric</key>
 	<dict>
 		<key>APIKey</key>
@@ -52,10 +50,15 @@
 			</dict>
 		</array>
 	</dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>org-appextension-feature-password-management</string>
 		<string>twitter</string>
+		<string>whatsapp</string>
+		<string>tg</string>
+		<string>googlegmail</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
@@ -72,10 +75,6 @@
 	<string>WordPress would like to add your location to posts on sites where you have enabled geotagging.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>WordPress would like to add your location to posts on sites where you have enabled geotagging.</string>
-	<key>NSMainNibFile</key>
-	<string>MainWindow</string>
-	<key>NSMainNibFile~ipad</key>
-	<string>MainWindow-iPad</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>For your videos to have sound on them.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
@@ -88,6 +87,7 @@
 	<string>org.wordpress.WordPressTodayWidget</string>
 	<key>UIBackgroundModes</key>
 	<array>
+		<string>fetch</string>
 		<string>remote-notification</string>
 	</array>
 	<key>UILaunchStoryboardName</key>

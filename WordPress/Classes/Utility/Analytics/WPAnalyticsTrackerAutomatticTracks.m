@@ -21,14 +21,19 @@
 @property (nonatomic, strong) TracksService *tracksService;
 @property (nonatomic, strong) NSDictionary *userProperties;
 @property (nonatomic, strong) NSString *anonymousID;
+@property (nonatomic, strong) NSString *loggedInID;
 
 @end
 
 NSString *const TracksEventPropertyButtonKey = @"button";
 NSString *const TracksEventPropertyMenuItemKey = @"menu_item";
 NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
+NSString *const TracksUserDefaultsLoggedInUserIDKey = @"TracksLoggedInUserID";
 
 @implementation WPAnalyticsTrackerAutomatticTracks
+
+@synthesize loggedInID = _loggedInID;
+@synthesize anonymousID = _anonymousID;
 
 + (NSString *)eventNameForStat:(WPAnalyticsStat)stat
 {
@@ -68,17 +73,13 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
 
 - (void)beginSession
 {
-#ifdef TRACKS_ENABLED
-    [self.tracksService switchToAnonymousUserWithAnonymousID:self.anonymousID];
-#endif
-    [self refreshMetadata];
-}
+    if (self.loggedInID.length > 0) {
+        [self.tracksService switchToAuthenticatedUserWithUsername:self.loggedInID userID:nil skipAliasEventCreation:YES];
+    } else {
+        [self.tracksService switchToAnonymousUserWithAnonymousID:self.anonymousID];
+    }
 
-- (void)endSession
-{
-    self.anonymousID = nil;
-    [[NSUserDefaults standardUserDefaults] removeObjectForKey:TracksUserDefaultsAnonymousUserIDKey];
-    [[NSUserDefaults standardUserDefaults] synchronize];
+    [self refreshMetadata];
 }
 
 - (void)refreshMetadata
@@ -105,10 +106,7 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
         }
     }];
     
-    BOOL dotcom_user = NO;
-    if (accountPresent) {
-        dotcom_user = YES;
-    }
+    BOOL dotcom_user = (accountPresent && username.length > 0);
     
     NSMutableDictionary *userProperties = [NSMutableDictionary new];
     userProperties[@"platform"] = @"iOS";
@@ -119,22 +117,31 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
 
     [self.tracksService.userProperties removeAllObjects];
     [self.tracksService.userProperties addEntriesFromDictionary:userProperties];
-    
-    if (dotcom_user == YES && [username length] > 0) {
-        [self.tracksService switchToAuthenticatedUserWithUsername:username userID:@"" skipAliasEventCreation:NO];
+
+    // Tell the client what kind of user
+    if (dotcom_user == YES) {
+        if (self.loggedInID.length == 0) {
+            // No previous username logged
+            self.loggedInID = username;
+            self.anonymousID = nil;
+
+            [self.tracksService switchToAuthenticatedUserWithUsername:username userID:@"" skipAliasEventCreation:NO];
+        } else if ([self.loggedInID isEqualToString:username]){
+            // Username did not change from last refreshMetadata - just make sure Tracks client has it
+            [self.tracksService switchToAuthenticatedUserWithUsername:username userID:@"" skipAliasEventCreation:YES];
+        } else {
+            // Username changed for some reason - switch back to anonymous first
+            [self.tracksService switchToAnonymousUserWithAnonymousID:self.anonymousID];
+            [self.tracksService switchToAuthenticatedUserWithUsername:username userID:@"" skipAliasEventCreation:NO];
+            self.loggedInID = username;
+            self.anonymousID = nil;
+        }
+    } else {
+        // User is not authenticated, switch to an anonymous mode
+        [self.tracksService switchToAnonymousUserWithAnonymousID:self.anonymousID];
+        self.loggedInID = nil;
     }
 }
-
-- (void)beginTimerForStat:(WPAnalyticsStat)stat
-{
-    
-}
-
-- (void)endTimerForStat:(WPAnalyticsStat)stat withProperties:(NSDictionary *)properties
-{
-    
-}
-
 
 #pragma mark - Private methods
 
@@ -152,6 +159,46 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
     }
     
     return _anonymousID;
+}
+
+- (void)setAnonymousID:(NSString *)anonymousID
+{
+    _anonymousID = anonymousID;
+
+    if (anonymousID == nil) {
+        [[NSUserDefaults standardUserDefaults] removeObjectForKey:TracksUserDefaultsAnonymousUserIDKey];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        return;
+    }
+
+    [[NSUserDefaults standardUserDefaults] setObject:anonymousID forKey:TracksUserDefaultsAnonymousUserIDKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+}
+
+- (NSString *)loggedInID
+{
+    if (_loggedInID == nil || _loggedInID.length == 0) {
+        NSString *loggedInID = [[NSUserDefaults standardUserDefaults] stringForKey:TracksUserDefaultsLoggedInUserIDKey];
+        if (loggedInID != nil) {
+            _loggedInID = loggedInID;
+        }
+    }
+
+    return _loggedInID;
+}
+
+- (void)setLoggedInID:(NSString *)loggedInID
+{
+    _loggedInID = loggedInID;
+
+    if (loggedInID == nil) {
+        [[NSUserDefaults standardUserDefaults] removeObjectForKey:TracksUserDefaultsLoggedInUserIDKey];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        return;
+    }
+
+    [[NSUserDefaults standardUserDefaults] setObject:loggedInID forKey:TracksUserDefaultsLoggedInUserIDKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
 + (TracksEventPair *)eventPairForStat:(WPAnalyticsStat)stat
@@ -205,6 +252,27 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
         case WPAnalyticsStatAppReviewsSentFeedback:
             eventName = @"app_reviews_feedback_sent";
             break;
+        case WPAnalyticsStatAppSettingsImageOptimizationChanged:
+            eventName = @"app_settings_image_optimization_changed";
+            break;
+        case WPAnalyticsStatAppSettingsMediaRemoveLocationChanged:
+            eventName = @"app_settings_media_remove_location_changed";
+            break;
+        case WPAnalyticsStatAppSettingsVideoOptimizationChanged:
+            eventName = @"app_settings_video_optimization_changed";
+            break;
+        case WPAnalyticsStatCreateAccountInitiated:
+            eventName = @"account_create_initiated";
+            break;
+        case WPAnalyticsStatCreateAccountEmailExists:
+            eventName = @"account_create_email_exists";
+            break;
+        case WPAnalyticsStatCreateAccountUsernameExists:
+            eventName = @"account_create_username_exists";
+            break;
+        case WPAnalyticsStatCreateAccountFailed:
+            eventName = @"account_create_failed";
+            break;
         case WPAnalyticsStatCreatedAccount:
             eventName = @"account_created";
             break;
@@ -227,6 +295,18 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
             eventName = @"editor_video_added";
             eventProperties = @{ @"via" : @"media_library" };
             break;
+        case WPAnalyticsStatEditorAztecBetaLink:
+            eventName = @"editor_aztec_beta_link";
+            break;
+        case WPAnalyticsStatEditorAztecPromoLink:
+            eventName = @"editor_aztec_promo_link";
+            break;
+        case WPAnalyticsStatEditorAztecPromoPositive:
+            eventName = @"editor_aztec_promo_positive";
+            break;
+        case WPAnalyticsStatEditorAztecPromoNegative:
+            eventName = @"editor_aztec_promo_negative";
+            break;
         case WPAnalyticsStatEditorClosed:
             eventName = @"editor_closed";
             break;
@@ -241,6 +321,12 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
             break;
         case WPAnalyticsStatEditorEnabledNewVersion:
             eventName = @"editor_enabled_new_version";
+            break;
+        case WPAnalyticsStatEditorResizedPhoto:
+            eventName = @"editor_resized_photo";
+            break;
+        case WPAnalyticsStatEditorResizedPhotoError:
+            eventName = @"editor_resized_photo_error";
             break;
         case WPAnalyticsStatEditorSavedDraft:
             eventName = @"editor_draft_saved";
@@ -265,6 +351,18 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
             eventName = @"editor_button_tapped";
             eventProperties = @{ TracksEventPropertyButtonKey : @"bold" };
             break;
+        case WPAnalyticsStatEditorTappedHeader:
+            eventName = @"editor_button_tapped";
+            eventProperties = @{ TracksEventPropertyButtonKey : @"header" };
+            break;
+        case WPAnalyticsStatEditorTappedHeaderSelection:
+            eventName = @"editor_button_tapped";
+            eventProperties = @{ TracksEventPropertyButtonKey : @"header_selection" };
+            break;
+        case WPAnalyticsStatEditorTappedHorizontalRule:
+            eventName = @"editor_button_tapped";
+            eventProperties = @{ TracksEventPropertyButtonKey : @"horizontal_rule" };
+            break;
         case WPAnalyticsStatEditorTappedHTML:
             eventName = @"editor_button_tapped";
             eventProperties = @{ TracksEventPropertyButtonKey : @"html" };
@@ -272,6 +370,22 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
         case WPAnalyticsStatEditorTappedImage:
             eventName = @"editor_button_tapped";
             eventProperties = @{ TracksEventPropertyButtonKey : @"image" };
+            break;
+        case WPAnalyticsStatEditorMediaPickerTappedDismiss:
+            eventName = @"media_picker_button_tapped";
+            eventProperties = @{ TracksEventPropertyButtonKey : @"cancel" };
+            break;
+        case WPAnalyticsStatEditorMediaPickerTappedDevicePhotos:
+            eventName = @"media_picker_button_tapped";
+            eventProperties = @{ TracksEventPropertyButtonKey : @"device_photos" };
+            break;
+        case WPAnalyticsStatEditorMediaPickerTappedCamera:
+            eventName = @"media_picker_button_tapped";
+            eventProperties = @{ TracksEventPropertyButtonKey : @"camera" };
+            break;
+        case WPAnalyticsStatEditorMediaPickerTappedMediaLibrary:
+            eventName = @"media_picker_button_tapped";
+            eventProperties = @{ TracksEventPropertyButtonKey : @"media_library" };
             break;
         case WPAnalyticsStatEditorTappedItalic:
             eventName = @"editor_button_tapped";
@@ -284,6 +398,10 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
         case WPAnalyticsStatEditorTappedMore:
             eventName = @"editor_button_tapped";
             eventProperties = @{ TracksEventPropertyButtonKey : @"more" };
+            break;
+        case WPAnalyticsStatEditorTappedMoreItems:
+            eventName = @"editor_button_tapped";
+            eventProperties = @{ TracksEventPropertyButtonKey : @"overflow_ellipsis" };
             break;
         case WPAnalyticsStatEditorTappedOrderedList:
             eventName = @"editor_button_tapped";
@@ -344,11 +462,77 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
         case WPAnalyticsStatLoginAutoFillCredentialsUpdated:
             eventName = @"login_autofill_credentials_updated";
             break;
+        case WPAnalyticsStatLoginProloguePaged:
+            eventName = @"login_prologue_paged";
+            break;
+        case WPAnalyticsStatLoginPrologueViewed:
+            eventName = @"login_prologue_viewed";
+            break;
+        case WPAnalyticsStatLoginEmailFormViewed:
+            eventName = @"login_email_form_viewed";
+            break;
+        case WPAnalyticsStatLoginMagicLinkOpenEmailClientViewed:
+            eventName = @"login_magic_link_open_email_client_viewed";
+            break;
+        case WPAnalyticsStatLoginMagicLinkRequestFormViewed:
+            eventName = @"login_magic_link_request_form_viewed";
+            break;
+        case WPAnalyticsStatLoginPasswordFormViewed:
+            eventName = @"login_password_form_viewed";
+            break;
+        case WPAnalyticsStatLoginURLFormViewed:
+            eventName = @"login_url_form_viewed";
+            break;
+        case WPAnalyticsStatLoginURLHelpScreenViewed:
+            eventName = @"login_url_help_screen_viewed";
+            break;
+        case WPAnalyticsStatLoginUsernamePasswordFormViewed:
+            eventName = @"login_username_password_form_viewed";
+            break;
+        case WPAnalyticsStatLoginTwoFactorFormViewed:
+            eventName = @"login_two_factor_form_viewed";
+            break;
+        case WPAnalyticsStatLoginEpilogueViewed:
+            eventName = @"login_epilogue_viewed";
+            break;
+        case WPAnalyticsStatLoginForgotPasswordClicked:
+            eventName = @"login_forgot_password_clicked";
+            break;
         case WPAnalyticsStatLogout:
             eventName = @"account_logout";
             break;
         case WPAnalyticsStatLowMemoryWarning:
             eventName = @"application_low_memory_warning";
+            break;
+        case WPAnalyticsStatMediaLibraryDeletedItems:
+            eventName = @"media_library_deleted_items";
+            break;
+        case WPAnalyticsStatMediaLibraryEditedItemMetadata:
+            eventName = @"media_library_edited_item_metadata";
+            break;
+        case WPAnalyticsStatMediaLibraryPreviewedItem:
+            eventName = @"media_library_previewed_item";
+            break;
+        case WPAnalyticsStatMediaLibrarySharedItemLink:
+            eventName = @"media_library_shared_item_link";
+            break;
+        case WPAnalyticsStatMediaLibraryAddedPhoto:
+            eventName = @"media_library_photo_added";
+            break;
+        case WPAnalyticsStatMediaLibraryAddedVideo:
+            eventName = @"media_library_video_added";
+            break;
+        case WPAnalyticsStatMediaServiceUploadStarted:
+            eventName = @"media_service_upload_started";
+            break;
+        case WPAnalyticsStatMediaServiceUploadFailed:
+            eventName = @"media_service_upload_failed";
+            break;
+        case WPAnalyticsStatMediaServiceUploadSuccessful:
+            eventName = @"media_service_upload_successful";
+            break;
+        case WPAnalyticsStatMediaServiceUploadCanceled:
+            eventName = @"media_service_upload_canceled";
             break;
         case WPAnalyticsStatMenusAccessed:
             eventName = @"menus_accessed";
@@ -419,6 +603,12 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
         case WPAnalyticsStatNotificationsSettingsUpdated:
             eventName = @"notification_settings_updated";
             break;
+        case WPAnalyticsStatNotificationsTappedNewPost:
+            eventName = @"notification_tapped_new_post";
+            break;
+        case WPAnalyticsStatNotificationsTappedViewReader:
+            eventName = @"notification_tapped_view_reader";
+            break;
         case WPAnalyticsStatOnePasswordFailed:
             eventName = @"one_password_failed";
             break;
@@ -431,6 +621,9 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
         case WPAnalyticsStatOpenedComments:
             eventName = @"site_menu_opened";
             eventProperties = @{ TracksEventPropertyMenuItemKey : @"comments" };
+            break;
+        case WPAnalyticsStatOpenedLogin:
+            eventName = @"login_accessed";
             break;
         case WPAnalyticsStatOpenedMediaLibrary:
             eventName = @"site_menu_opened";
@@ -522,6 +715,10 @@ NSString *const TracksUserDefaultsAnonymousUserIDKey = @"TracksAnonymousUserID";
         case WPAnalyticsStatPostListPublishAction:
             eventName = @"post_list_button_pressed";
             eventProperties = @{ TracksEventPropertyButtonKey : @"publish" };
+            break;
+        case WPAnalyticsStatPostListScheduleAction:
+            eventName = @"post_list_button_pressed";
+            eventProperties = @{ TracksEventPropertyButtonKey : @"schedule" };
             break;
         case WPAnalyticsStatPostListPullToRefresh:
             eventName = @"post_list_pull_to_refresh_triggered";

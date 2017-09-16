@@ -1,6 +1,6 @@
 #import "SettingsMultiTextViewController.h"
-#import "WPStyleGuide.h"
-#import "WPTableViewCell.h"
+#import <WordPressShared/WPStyleGuide.h>
+#import <WordPressShared/WPTableViewCell.h>
 
 static CGVector const SettingsTextPadding = {11.0f, 3.0f};
 static CGFloat const SettingsMinHeight = 41.0f;
@@ -25,6 +25,7 @@ static CGFloat const SettingsMinHeight = 41.0f;
         _placeholder = placeholder;
         _hint = hint;
         _isPassword = isPassword;
+        _autocapitalizationType = UITextAutocapitalizationTypeSentences;
     }
     return self;
 }
@@ -47,10 +48,13 @@ static CGFloat const SettingsMinHeight = 41.0f;
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
 }
 
-- (void)viewWillLayoutSubviews
+- (void)viewDidLayoutSubviews
 {
-    [super viewWillLayoutSubviews];
-    [self adjustCellSize];
+    [super viewDidLayoutSubviews];
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self adjustCellSize];
+    });
 }
 
 - (UITableViewCell *)textViewCell
@@ -70,6 +74,7 @@ static CGFloat const SettingsMinHeight = 41.0f;
     textView.textColor = [WPStyleGuide darkGrey];
     textView.delegate = self;
     textView.scrollEnabled = NO;
+    textView.autocapitalizationType = self.autocapitalizationType;
 
     UIEdgeInsets textInset = textView.textContainerInset;
     textInset.left = 0.0;
@@ -138,14 +143,17 @@ static CGFloat const SettingsMinHeight = 41.0f;
 {
     CGSize size = [self.textView sizeThatFits:CGSizeMake(self.textView.frame.size.width, CGFLOAT_MAX)];
     CGFloat height = size.height;
+    CGFloat targetHeight = MAX(height, SettingsMinHeight) + SettingsTextPadding.dy;
+    targetHeight = roundf(targetHeight);
 
-    if (fabs(self.tableView.rowHeight - height) > (self.textView.font.lineHeight * 0.5f))
+    if (self.tableView.rowHeight == targetHeight)
     {
-        [self.tableView beginUpdates];
-        self.textView.frame = CGRectMake(SettingsTextPadding.dx, SettingsTextPadding.dy, self.textView.frame.size.width, height);
-        self.tableView.rowHeight = MAX(height, SettingsMinHeight) + SettingsTextPadding.dy;
-        [self.tableView endUpdates];
+        return;
     }
+
+    [self.tableView beginUpdates];
+    self.tableView.rowHeight = targetHeight;
+    [self.tableView endUpdates];
 }
 
 @end

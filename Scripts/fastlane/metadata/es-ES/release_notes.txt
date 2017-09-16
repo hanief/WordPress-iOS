@@ -1,0 +1,2 @@
+Sitios Jetpack: Añadida compatibilidad con perfiles personalizados.
+Varias mejoras menores y soluciones a fallos.

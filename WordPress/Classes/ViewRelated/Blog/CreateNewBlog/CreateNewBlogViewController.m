@@ -1,22 +1,23 @@
 #import "CreateNewBlogViewController.h"
+#import "ApiCredentials.h"
 #import "WPNUXMainButton.h"
 #import "WPNUXSecondaryButton.h"
 #import "WPWalkthroughTextField.h"
 #import "WPAsyncBlockOperation.h"
 #import "WPWalkthroughOverlayView.h"
-#import "WPNUXUtility.h"
-#import "WPStyleGuide.h"
 #import "UILabel+SuggestSize.h"
 #import "WPAccount.h"
 #import "Blog.h"
-#import "WordPressComServiceRemote.h"
 #import "AccountService.h"
 #import "BlogService.h"
 #import "ContextManager.h"
-#import "NSString+XMLExtensions.h"
 #import "Constants.h"
-
+#import <WordPressShared/NSString+XMLExtensions.h>
+#import <WordPressShared/WPNUXUtility.h>
+#import <WordPressShared/WPStyleGuide.h>
 #import "WordPress-Swift.h"
+@import WordPressKit;
+@import WordPressShared;
 
 NSString * const NewWPComBlogCreatedNotification = @"NewWPComBlogCreatedNotification";
 NSString * const NewWPComBlogCreatedNotificationBlogUserInfoKey = @"NewWPComBlogCreatedNotificationBlogUserInfoKey";
@@ -508,10 +509,7 @@ static UIEdgeInsets const CreateBlogCancelButtonPaddingPad  = {1.0, 13.0, 0.0, 0
             blog.url = blogOptions[@"url"];
             blog.settings.name = [[blogOptions stringForKey:@"blogname"] stringByDecodingXMLCharacters];
 
-            [[ContextManager sharedInstance] saveContext:context];
-
-            // syncBlog will need a permanent ID so it can fetch and update the blog in its request completion blocks 
-            [[ContextManager sharedInstance] obtainPermanentIDForObject:blog];
+            [[ContextManager sharedInstance] saveContextAndWait:context];
 
             __weak __typeof(self) weakSelf = self;
 
@@ -527,13 +525,14 @@ static UIEdgeInsets const CreateBlogCancelButtonPaddingPad  = {1.0, 13.0, 0.0, 0
                 }];
             };
 
-            [blogService syncBlog:blog completionHandler:^{
-                [accountService updateUserDetailsForAccount:defaultAccount
-                                                    success:completion
-                                                    failure:^(NSError * _Nonnull error) {
-                                                        completion();
-                                                    }];
-            }];
+            [blogService syncBlogAndAllMetadata:blog
+                              completionHandler:^{
+                                  [accountService updateUserDetailsForAccount:defaultAccount
+                                                                      success:completion
+                                                                      failure:^(NSError * _Nonnull error) {
+                                                                          completion();
+                                                                      }];
+                              }];
         };
 
         WordPressComServiceFailureBlock createBlogFailure = ^(NSError *error) {
@@ -555,6 +554,8 @@ static UIEdgeInsets const CreateBlogCancelButtonPaddingPad  = {1.0, 13.0, 0.0, 0
                            andBlogTitle:_siteTitleField.text
                           andLanguageId:languageId
                       andBlogVisibility:WordPressComServiceBlogVisibilityPublic
+                            andClientID:ApiCredentials.client
+                        andClientSecret:ApiCredentials.secret
                                 success:createBlogSuccess
                                 failure:createBlogFailure];
     }];

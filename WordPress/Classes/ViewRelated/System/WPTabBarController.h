@@ -36,13 +36,15 @@ typedef NS_ENUM(NSUInteger, WPTabType) {
 - (void)showReaderTab;
 - (void)showPostTab;
 - (void)showNotificationsTab;
-- (void)showPostTabWithOptions:(NSDictionary *)options;
+- (void)showPostTabAnimated:(BOOL)animated toMedia:(BOOL)openToMedia;
 - (void)showReaderTabForPost:(NSNumber *)postId onBlog:(NSNumber *)blogId;
 
+- (void)switchMySitesTabToAddNewSite;
 - (void)switchMySitesTabToStatsViewForBlog:(Blog *)blog;
 - (void)switchMySitesTabToCustomizeViewForBlog:(Blog *)blog;
 - (void)switchMySitesTabToThemesViewForBlog:(Blog *)blog;
 - (void)switchTabToPostsListForPost:(AbstractPost *)post;
+- (void)switchMeTabToAppSettings;
 
 - (void)showNotificationsTabForNoteWithID:(NSString *)notificationID;
 - (void)updateNotificationBadgeVisibility;

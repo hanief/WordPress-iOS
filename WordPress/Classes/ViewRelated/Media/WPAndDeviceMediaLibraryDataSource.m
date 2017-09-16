@@ -13,26 +13,71 @@
 
 - (instancetype)initWithBlog:(Blog *)blog
 {
+    return [self initWithBlog:blog
+        initialDataSourceType:MediaPickerDataSourceTypeDevice];
+}
+
+- (instancetype)initWithBlog:(Blog *)blog
+       initialDataSourceType:(MediaPickerDataSourceType)sourceType
+{
     self = [super init];
     if (self) {
         _mediaLibraryDataSource = [[MediaLibraryPickerDataSource alloc] initWithBlog:blog];
-        _deviceLibraryDataSource = [[WPPHAssetDataSource alloc] init];
-        _currentDataSource = _deviceLibraryDataSource;
-        _observers = [[NSMutableDictionary alloc] init];
+
+        [self commonInitWithSourceType:sourceType];
     }
     return self;
 }
 
 - (instancetype)initWithPost:(AbstractPost *)post
 {
+    return [self initWithPost:post
+        initialDataSourceType:MediaPickerDataSourceTypeDevice];
+}
+
+- (instancetype)initWithPost:(AbstractPost *)post
+       initialDataSourceType:(MediaPickerDataSourceType)sourceType
+{
     self = [super init];
     if (self) {
         _mediaLibraryDataSource = [[MediaLibraryPickerDataSource alloc] initWithPost:post];
-        _deviceLibraryDataSource = [[WPPHAssetDataSource alloc] init];
-        _currentDataSource = _deviceLibraryDataSource;
-        _observers = [[NSMutableDictionary alloc] init];
+
+        [self commonInitWithSourceType:sourceType];
     }
     return self;
+}
+
+- (void)commonInitWithSourceType:(MediaPickerDataSourceType)sourceType
+{
+    _deviceLibraryDataSource = [[WPPHAssetDataSource alloc] init];
+
+    _observers = [[NSMutableDictionary alloc] init];
+
+    [self setDataSourceType:sourceType];
+
+    // If we're showing the media library first, ensure that we have
+    // the groups loaded for the device library so that the user can switch.
+    if (self.dataSourceType == MediaPickerDataSourceTypeMediaLibrary) {
+        [_deviceLibraryDataSource loadDataWithOptions:WPMediaLoadOptionsGroups success:nil failure:nil];
+    }
+}
+
+- (MediaPickerDataSourceType)dataSourceType
+{
+    return (_currentDataSource == _deviceLibraryDataSource) ? MediaPickerDataSourceTypeDevice : MediaPickerDataSourceTypeMediaLibrary;
+}
+
+- (void)setDataSourceType:(MediaPickerDataSourceType)dataSourceType
+{
+    switch (dataSourceType) {
+        case MediaPickerDataSourceTypeDevice:
+            _currentDataSource = _deviceLibraryDataSource;
+            break;
+        case MediaPickerDataSourceTypeMediaLibrary:
+            _currentDataSource = _mediaLibraryDataSource;
+        default:
+            break;
+    }
 }
 
 - (NSInteger)numberOfGroups
@@ -102,8 +147,10 @@
         }
     }];
     id<NSObject> secondKey = [self.mediaLibraryDataSource registerChangeObserverBlock:^(BOOL incrementalChanges, NSIndexSet *removed, NSIndexSet *inserted, NSIndexSet *changed, NSArray<id<WPMediaMove>> *moved) {
-        if (callback) {
-            callback(incrementalChanges, removed, inserted, changed, moved);
+        if (weakSelf.currentDataSource == weakSelf.mediaLibraryDataSource) {
+            if (callback) {
+                callback(incrementalChanges, removed, inserted, changed, moved);
+            }
         }
     }];
     
@@ -121,21 +168,30 @@
     [self.mediaLibraryDataSource unregisterChangeObserver:keys[1]];
 }
 
-- (void)loadDataWithSuccess:(WPMediaSuccessBlock)successBlock
+- (void)loadDataWithOptions:(WPMediaLoadOptions)options
+                    success:(WPMediaSuccessBlock)successBlock
                     failure:(WPMediaFailureBlock)failureBlock
 {
-    [self.currentDataSource loadDataWithSuccess:successBlock failure:^(NSError *error) {
-        if ([error.domain isEqualToString:WPMediaPickerErrorDomain] && error.code == WPMediaErrorCodePermissionsFailed) {
-            if (self.currentDataSource == self.deviceLibraryDataSource) {                
-                self.currentDataSource = self.mediaLibraryDataSource;
-                [self loadDataWithSuccess:successBlock failure:failureBlock];
-                return;
+    if (options == WPMediaLoadOptionsGroups || options == WPMediaLoadOptionsGroupsAndAssets) {
+        [self.deviceLibraryDataSource loadDataWithOptions:options success:^{
+            [self.mediaLibraryDataSource loadDataWithOptions:options success:successBlock failure:failureBlock];
+        } failure:^(NSError *error) {
+            [self.mediaLibraryDataSource loadDataWithOptions:options success:successBlock failure:failureBlock];
+        }];
+    } else {
+        [self.currentDataSource loadDataWithOptions:options success:successBlock failure:^(NSError *error) {
+            if ([error.domain isEqualToString:WPMediaPickerErrorDomain] && error.code == WPMediaErrorCodePermissionsFailed) {
+                if (self.currentDataSource == self.deviceLibraryDataSource) {                
+                    self.currentDataSource = self.mediaLibraryDataSource;
+                    [self loadDataWithOptions:options success:successBlock failure:failureBlock];
+                    return;
+                }
             }
-        }
-        if (failureBlock) {
-            failureBlock(error);
-        }
-    }];
+            if (failureBlock) {
+                failureBlock(error);
+            }
+        }];
+    }
 }
 
 - (void)addImage:(UIImage *)image metadata:(NSDictionary *)metadata completionBlock:(WPMediaAddedBlock)completionBlock
@@ -169,9 +225,5 @@
 {
     return [self.currentDataSource ascendingOrdering];
 }
-
-
-
-
 
 @end

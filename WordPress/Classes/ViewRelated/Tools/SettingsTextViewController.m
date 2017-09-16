@@ -1,6 +1,6 @@
 #import "SettingsTextViewController.h"
-#import "WPTextFieldTableViewCell.h"
-#import "WPStyleGuide.h"
+#import <WordPressShared/WPTextFieldTableViewCell.h>
+#import <WordPressShared/WPStyleGuide.h>
 #import "WordPress-Swift.h"
 
 
@@ -275,7 +275,7 @@ typedef NS_ENUM(NSInteger, SettingsTextSections) {
 
 - (void)dismissViewController
 {
-    if (self.isModal && self.navigationController.viewControllers.count == 1) {
+    if (self.isModal) {
         [self dismissViewControllerAnimated:YES completion:nil];
     } else {
         [self.navigationController popViewControllerAnimated:YES];

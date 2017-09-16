@@ -1,17 +1,47 @@
 import Foundation
 import UIKit
+import CocoaLumberjack
 import WordPressShared
-import WordPressComAnalytics
 
 /// Displays a Blog's User Details
 ///
-final class PersonViewController : UITableViewController {
+final class PersonViewController: UITableViewController {
+
+    /// PersonViewController operation modes
+    ///
+    enum ScreenMode: String {
+        case User      = "user"
+        case Follower  = "follower"
+        case Viewer    = "viewer"
+
+        var title: String {
+            switch self {
+            case .User:
+                return NSLocalizedString("Blog's User", comment: "Blog's User Profile. Displayed when the name is empty!")
+            case .Follower:
+                return NSLocalizedString("Blog's Follower", comment: "Blog's Follower Profile. Displayed when the name is empty!")
+            case .Viewer:
+                return NSLocalizedString("Blog's Viewer", comment: "Blog's Viewer Profile. Displayed when the name is empty!")
+            }
+        }
+
+        var name: String {
+            switch self {
+            case .User:
+                return NSLocalizedString("user", comment: "Noun. Describes a site's user.")
+            case .Follower:
+                return NSLocalizedString("follower", comment: "Noun. Describes a site's follower.")
+            case .Viewer:
+                return NSLocalizedString("viewer", comment: "Noun. Describes a site's viewer.")
+            }
+        }
+    }
 
     // MARK: - Public Properties
 
     /// Blog to which the Person belongs
     ///
-    var blog : Blog!
+    var blog: Blog!
 
     /// Core Data Context that should be used
     ///
@@ -19,15 +49,19 @@ final class PersonViewController : UITableViewController {
 
     /// Person to be displayed
     ///
-    var person : Person! {
+    var person: Person! {
         didSet {
             refreshInterfaceIfNeeded()
         }
     }
 
+    /// Mode: User / Follower / Viewer
+    ///
+    var screenMode: ScreenMode = .User
+
     /// Gravatar Image
     ///
-    @IBOutlet var gravatarImageView : UIImageView! {
+    @IBOutlet var gravatarImageView: UIImageView! {
         didSet {
             refreshGravatarImage()
         }
@@ -35,7 +69,7 @@ final class PersonViewController : UITableViewController {
 
     /// Person's Full Name
     ///
-    @IBOutlet var fullNameLabel : UILabel! {
+    @IBOutlet var fullNameLabel: UILabel! {
         didSet {
             setupFullNameLabel()
             refreshFullNameLabel()
@@ -44,7 +78,7 @@ final class PersonViewController : UITableViewController {
 
     /// Person's User Name
     ///
-    @IBOutlet var usernameLabel : UILabel! {
+    @IBOutlet var usernameLabel: UILabel! {
         didSet {
             setupUsernameLabel()
             refreshUsernameLabel()
@@ -53,7 +87,7 @@ final class PersonViewController : UITableViewController {
 
     /// Person's Role
     ///
-    @IBOutlet var roleCell : UITableViewCell! {
+    @IBOutlet var roleCell: UITableViewCell! {
         didSet {
             setupRoleCell()
             refreshRoleCell()
@@ -62,7 +96,7 @@ final class PersonViewController : UITableViewController {
 
     /// Person's First Name
     ///
-    @IBOutlet var firstNameCell : UITableViewCell! {
+    @IBOutlet var firstNameCell: UITableViewCell! {
         didSet {
             setupFirstNameCell()
             refreshFirstNameCell()
@@ -71,7 +105,7 @@ final class PersonViewController : UITableViewController {
 
     /// Person's Last Name
     ///
-    @IBOutlet var lastNameCell : UITableViewCell! {
+    @IBOutlet var lastNameCell: UITableViewCell! {
         didSet {
             setupLastNameCell()
             refreshLastNameCell()
@@ -80,7 +114,7 @@ final class PersonViewController : UITableViewController {
 
     /// Person's Display Name
     ///
-    @IBOutlet var displayNameCell : UITableViewCell! {
+    @IBOutlet var displayNameCell: UITableViewCell! {
         didSet {
             setupDisplayNameCell()
             refreshDisplayNameCell()
@@ -89,7 +123,7 @@ final class PersonViewController : UITableViewController {
 
     /// Nuking the User
     ///
-    @IBOutlet var removeCell : UITableViewCell! {
+    @IBOutlet var removeCell: UITableViewCell! {
         didSet {
             setupRemoveCell()
             refreshRemoveCell()
@@ -105,21 +139,22 @@ final class PersonViewController : UITableViewController {
 
         super.viewDidLoad()
 
-        title = person.fullName.nonEmptyString() ?? NSLocalizedString("Blog's User", comment: "Blog's User Profile. Displayed when the name is empty!")
-        WPStyleGuide.configureColorsForView(view, andTableView: tableView)
+        title = person.fullName.nonEmptyString() ?? screenMode.title
+        WPStyleGuide.configureColors(for: view, andTableView: tableView)
+        WPStyleGuide.configureAutomaticHeightRows(for: tableView)
     }
 
-    override func viewWillAppear(animated: Bool) {
+    override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        WPAnalytics.track(.OpenedPerson)
+        WPAnalytics.track(.openedPerson)
     }
 
     // MARK: - UITableView Methods
 
-    override func tableView(tableView: UITableView, didSelectRowAtIndexPath indexPath: NSIndexPath) {
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectSelectedRowWithAnimation(true)
 
-        guard let cell = tableView.cellForRowAtIndexPath(indexPath) else {
+        guard let cell = tableView.cellForRow(at: indexPath) else {
             return
         }
 
@@ -133,7 +168,7 @@ final class PersonViewController : UITableViewController {
         }
     }
 
-    override func tableView(tableView: UITableView, heightForRowAtIndexPath indexPath: NSIndexPath) -> CGFloat {
+    override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
         // Forgive Me:
         // ===========
         // Why do we check the indexPath's values, instead of grabbing the cellForRowAtIndexPath, and check if
@@ -145,21 +180,21 @@ final class PersonViewController : UITableViewController {
         //
         //
         if isFullnamePrivate == true && fullnameSection == indexPath.section && fullnameRows.contains(indexPath.row) {
-            return CGFloat.min
+            return CGFloat.leastNormalMagnitude
         }
-        return super.tableView(tableView, heightForRowAtIndexPath: indexPath)
+        return super.tableView(tableView, heightForRowAt: indexPath)
     }
 
 
 
     // MARK: - Storyboard Methods
 
-    override func prepareForSegue(segue: UIStoryboardSegue, sender: AnyObject?) {
-        guard let roleViewController = segue.destinationViewController as? RoleViewController else {
+    override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
+        guard let roleViewController = segue.destination as? RoleViewController else {
             return
         }
 
-        roleViewController.mode = .Dynamic(blog: blog)
+        roleViewController.roles = blog.sortedRoles?.map({ $0.toUnmanaged() }) ?? []
         roleViewController.selectedRole = person.role
         roleViewController.onChange = { [weak self] newRole in
             self?.updateUserRole(newRole)
@@ -169,10 +204,10 @@ final class PersonViewController : UITableViewController {
 
 
     // MARK: - Constants
-    private let roleSegueIdentifier = "editRole"
-    private let gravatarPlaceholderImage = UIImage(named: "gravatar.png")
-    private let fullnameSection = 1
-    private let fullnameRows = [1, 2]
+    fileprivate let roleSegueIdentifier = "editRole"
+    fileprivate let gravatarPlaceholderImage = UIImage(named: "gravatar.png")
+    fileprivate let fullnameSection = 1
+    fileprivate let fullnameRows = [1, 2]
 }
 
 
@@ -182,7 +217,7 @@ final class PersonViewController : UITableViewController {
 private extension PersonViewController {
 
     func roleWasPressed() {
-        performSegueWithIdentifier(roleSegueIdentifier, sender: nil)
+        performSegue(withIdentifier: roleSegueIdentifier, sender: nil)
     }
 
     func removeWasPressed() {
@@ -190,25 +225,47 @@ private extension PersonViewController {
         let titleText = String(format: titleFormat, person.username)
 
         let name = person.firstName?.nonEmptyString() ?? person.username
-        let messageFirstLine = NSLocalizedString(
-            "If you remove " + name + ", that user will no longer be able to access this site, " +
-            "but any content that was created by " + name + " will remain on the site.",
-            comment: "Remove User Warning")
 
-        let messageSecondLine = NSLocalizedString("Would you still like to remove this user?",
-            comment: "Remove User Confirmation")
+        var messageFirstLine: String
+        switch screenMode {
+        case .User:
+            messageFirstLine = NSLocalizedString( "If you remove " + name + ", that user will no longer be able to access this site, " +
+                                                  "but any content that was created by " + name + " will remain on the site.",
+                                                  comment: "First line of remove user warning")
+        case .Follower:
+            messageFirstLine = NSLocalizedString( "If removed, this follower will stop receiving notifications about this site, unless they re-follow.",
+                                                  comment: "First line of remove follower warning")
+        case .Viewer:
+            messageFirstLine = NSLocalizedString( "If you remove this viewer, he or she will not be able to visit this site.",
+                                                  comment: "First line of remove viewer warning")
+        }
 
-        let message = messageFirstLine + "\n\n" + messageSecondLine
+        let messageSecondLineFormat = NSLocalizedString("Would you still like to remove this %@?", comment: "Second line of Remove user/follower/viewer confirmation. ")
+        let messageSecondLineText = String(format: messageSecondLineFormat, screenMode.name)
+
+        let message = messageFirstLine + "\n\n" + messageSecondLineText
 
         let cancelTitle = NSLocalizedString("Cancel", comment: "Cancel Action")
         let removeTitle = NSLocalizedString("Remove", comment: "Remove Action")
 
-        let alert = UIAlertController(title: titleText, message: message, preferredStyle: .Alert)
+        let alert = UIAlertController(title: titleText, message: message, preferredStyle: .alert)
 
         alert.addCancelActionWithTitle(cancelTitle)
 
         alert.addDestructiveActionWithTitle(removeTitle) { [weak self] action in
-            self?.deleteUser()
+            guard let strongSelf = self else {
+                return
+            }
+
+            switch strongSelf.screenMode {
+            case .User:
+                strongSelf.deleteUser()
+            case .Follower:
+                strongSelf.deleteFollower()
+            case .Viewer:
+                strongSelf.deleteViewer()
+                return
+            }
         }
 
         alert.presentFromRootViewController()
@@ -216,27 +273,97 @@ private extension PersonViewController {
 
     func deleteUser() {
         guard let user = user else {
-            DDLogSwift.logError("Error: Only Users can be deleted")
+            DDLogError("Error: Only Users can be deleted here")
             assertionFailure()
             return
         }
 
         let service = PeopleService(blog: blog, context: context)
-        service?.deleteUser(user)
-        navigationController?.popViewControllerAnimated(true)
+        service?.deleteUser(user, success: {
+            WPAnalytics.track(.personRemoved)
+        }, failure: {[weak self] (error: Error?) -> () in
+            guard let strongSelf = self, let error = error as NSError? else {
+                return
+            }
+            guard let personWithError = strongSelf.person else {
+                return
+            }
 
-        WPAnalytics.track(.PersonRemoved)
+            strongSelf.handleRemoveUserError(error, userName: "@" + personWithError.username)
+        })
+        _ = navigationController?.popViewController(animated: true)
     }
 
-    func updateUserRole(newRole: Role) {
+    func deleteFollower() {
+        guard let follower = follower, isFollower else {
+            DDLogError("Error: Only Followers can be deleted here")
+            assertionFailure()
+            return
+        }
+
+        let service = PeopleService(blog: blog, context: context)
+        service?.deleteFollower(follower, failure: {[weak self] (error: Error?) -> () in
+            guard let strongSelf = self, let error = error as NSError? else {
+                return
+            }
+
+            strongSelf.handleRemoveViewerOrFollowerError(error)
+        })
+        _ = navigationController?.popViewController(animated: true)
+    }
+
+    func deleteViewer() {
+        guard let viewer = viewer, isViewer else {
+            DDLogError("Error: Only Viewers can be deleted here")
+            assertionFailure()
+            return
+        }
+
+        let service = PeopleService(blog: blog, context: context)
+        service?.deleteViewer(viewer, success: {
+            WPAnalytics.track(.personRemoved)
+        }, failure: {[weak self] (error: Error?) -> () in
+            guard let strongSelf = self, let error = error as NSError? else {
+                return
+            }
+
+            strongSelf.handleRemoveViewerOrFollowerError(error)
+        })
+        _ = navigationController?.popViewController(animated: true)
+    }
+
+    func handleRemoveUserError(_ error: NSError, userName: String) {
+        // The error code will be "forbidden" per:
+        // https://developer.wordpress.com/docs/api/1.1/post/sites/%24site/users/%24user_ID/delete/
+        guard let errorCode = error.userInfo[WordPressComRestApi.ErrorKeyErrorCode] as? String,
+            errorCode.localizedCaseInsensitiveContains("forbidden") else {
+            let errorWithSource = NSError(domain: error.domain, code: error.code, userInfo: error.userInfo)
+            WPError.showNetworkingAlertWithError(errorWithSource)
+            return
+        }
+
+        let errorTitleFormat = NSLocalizedString("Error removing %@", comment: "Title of error dialog when removing a site owner fails.")
+        let errorTitleText = String(format: errorTitleFormat, userName)
+        let errorMessage = NSLocalizedString("The user you are trying to remove is the owner of this site. " +
+                                             "Please contact support for assistance.",
+                                             comment: "Error message shown when user attempts to remove the site owner.")
+        WPError.showAlert(withTitle: errorTitleText, message: errorMessage, withSupportButton: true)
+    }
+
+    func handleRemoveViewerOrFollowerError(_ error: NSError) {
+        let errorWithSource = NSError(domain: error.domain, code: error.code, userInfo: error.userInfo)
+        WPError.showNetworkingAlertWithError(errorWithSource)
+    }
+
+    func updateUserRole(_ newRole: String) {
         guard let user = user else {
-            DDLogSwift.logError("Error: Only Users have Roles!")
+            DDLogError("Error: Only Users have Roles!")
             assertionFailure()
             return
         }
 
         guard let service = PeopleService(blog: blog, context: context) else {
-            DDLogSwift.logError("Couldn't instantiate People Service")
+            DDLogError("Couldn't instantiate People Service")
             return
         }
 
@@ -248,17 +375,17 @@ private extension PersonViewController {
         // Optimistically refresh the UI
         self.person = updated
 
-        WPAnalytics.track(.PersonUpdated)
+        WPAnalytics.track(.personUpdated)
     }
 
-    func retryUpdatingRole(newRole: Role) {
+    func retryUpdatingRole(_ newRole: String) {
         let retryTitle          = NSLocalizedString("Retry", comment: "Retry updating User's Role")
         let cancelTitle         = NSLocalizedString("Cancel", comment: "Cancel updating User's Role")
         let title               = NSLocalizedString("Sorry!", comment: "Update User Failed Title")
         let localizedError      = NSLocalizedString("There was an error updating @%@", comment: "Updating Role failed error message")
         let messageText         = String(format: localizedError, person.username)
 
-        let alertController = UIAlertController(title: title, message: messageText, preferredStyle: .Alert)
+        let alertController = UIAlertController(title: title, message: messageText, preferredStyle: .alert)
 
         alertController.addCancelActionWithTitle(cancelTitle, handler: nil)
         alertController.addDefaultActionWithTitle(retryTitle) { action in
@@ -320,7 +447,7 @@ private extension PersonViewController {
 private extension PersonViewController {
 
     func refreshInterfaceIfNeeded() {
-        guard isViewLoaded() else {
+        guard isViewLoaded else {
             return
         }
 
@@ -335,7 +462,9 @@ private extension PersonViewController {
     }
 
     func refreshGravatarImage() {
-        gravatarImageView.downloadImage(person.avatarURL, placeholderImage: gravatarPlaceholderImage)
+        let gravatar = person.avatarURL.flatMap { Gravatar($0) }
+        let placeholder = UIImage(named: "gravatar")!
+        gravatarImageView.downloadGravatar(gravatar, placeholder: placeholder, animate: false)
     }
 
     func refreshFullNameLabel() {
@@ -348,29 +477,28 @@ private extension PersonViewController {
 
     func refreshFirstNameCell() {
         firstNameCell.detailTextLabel?.text = person.firstName
-        firstNameCell.hidden = isFullnamePrivate
+        firstNameCell.isHidden = isFullnamePrivate
     }
 
     func refreshLastNameCell() {
         lastNameCell.detailTextLabel?.text = person.lastName
-        lastNameCell.hidden = isFullnamePrivate
+        lastNameCell.isHidden = isFullnamePrivate
     }
 
     func refreshDisplayNameCell() {
         displayNameCell.detailTextLabel?.text = person.displayName
     }
 
-    private func refreshRoleCell() {
+    func refreshRoleCell() {
         let enabled = isPromoteEnabled
-        roleCell.detailTextLabel?.text = person.role.localizedName
-        roleCell.accessoryType = enabled ? .DisclosureIndicator : .None
-        roleCell.selectionStyle = enabled ? .Gray : .None
-        roleCell.userInteractionEnabled = enabled
-        roleCell.detailTextLabel?.text = person.role.localizedName
+        roleCell.accessoryType = enabled ? .disclosureIndicator : .none
+        roleCell.selectionStyle = enabled ? .gray : .none
+        roleCell.isUserInteractionEnabled = enabled
+        roleCell.detailTextLabel?.text = role?.name
     }
 
     func refreshRemoveCell() {
-        removeCell.hidden = !isRemoveEnabled
+        removeCell.isHidden = !isRemoveEnabled
     }
 }
 
@@ -380,8 +508,8 @@ private extension PersonViewController {
 //
 private extension PersonViewController {
 
-    var isMyself : Bool {
-        return blog.account!.userID == person.ID || blog.account!.userID == person.linkedUserID
+    var isMyself: Bool {
+        return blog.account!.userID.intValue == person.ID || blog.account!.userID.intValue == person.linkedUserID
     }
 
     var isFullnamePrivate: Bool {
@@ -396,11 +524,15 @@ private extension PersonViewController {
     }
 
     var isRemoveEnabled: Bool {
-        // Notes:
-        //  -   YES, ListUsers. Brought from Calypso's code
-        //  -   Followers, for now, cannot be deleted.
-        //
-        return blog.isUserCapableOf(.ListUsers) && isMyself == false && isUser == true
+        switch screenMode {
+        case .User:
+            // YES, ListUsers. Brought from Calypso's code
+            return blog.isUserCapableOf(.ListUsers) && isMyself == false && isUser == true
+        case .Follower:
+            return isFollower == true
+        case .Viewer:
+            return isViewer == true
+        }
     }
 
     var isUser: Bool {
@@ -409,5 +541,35 @@ private extension PersonViewController {
 
     var user: User? {
         return person as? User
+    }
+
+    var isFollower: Bool {
+        return follower != nil
+    }
+
+    var follower: Follower? {
+        return person as? Follower
+    }
+
+    var isViewer: Bool {
+        return viewer != nil
+    }
+
+    var viewer: Viewer? {
+        return person as? Viewer
+    }
+
+    var role: RemoteRole? {
+        switch screenMode {
+        case .Follower:
+            return .follower
+        case .Viewer:
+            return .viewer
+        case .User:
+            guard let service = RoleService(blog: blog, context: context) else {
+                return nil
+            }
+            return service.getRole(slug: person.role)?.toUnmanaged()
+        }
     }
 }

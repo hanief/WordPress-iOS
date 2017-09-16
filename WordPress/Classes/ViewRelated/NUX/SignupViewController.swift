@@ -1,12 +1,11 @@
 import UIKit
-import WordPressComAnalytics
+import CocoaLumberjack
 import WordPressShared
 
 
 /// Create a new WordPress.com account and blog.
 ///
-@objc class SignupViewController : NUXAbstractViewController, SigninKeyboardResponder
-{
+@objc class SignupViewController: NUXAbstractViewController, SigninKeyboardResponder {
     @IBOutlet weak var logoImageView: UIImageView!
     @IBOutlet weak var titleLabel: UILabel!
     @IBOutlet weak var emailField: WPWalkthroughTextField!
@@ -16,14 +15,14 @@ import WordPressShared
     @IBOutlet weak var submitButton: NUXSubmitButton!
     @IBOutlet weak var statusLabel: UILabel!
     @IBOutlet weak var termsButton: UIButton!
-    @IBOutlet var bottomContentConstraint: NSLayoutConstraint!
-    @IBOutlet var verticalCenterConstraint: NSLayoutConstraint!
+    @IBOutlet var bottomContentConstraint: NSLayoutConstraint?
+    @IBOutlet var verticalCenterConstraint: NSLayoutConstraint?
     @IBOutlet var topLayoutGuideAdjustmentConstraint: NSLayoutConstraint!
     @IBOutlet var formTopMarginConstraint: NSLayoutConstraint!
     var onePasswordButton: UIButton!
     var didCorrectEmailOnce: Bool = false
     var userDefinedSiteAddress: Bool = false
-    let operationQueue = NSOperationQueue()
+    let operationQueue = OperationQueue()
     var account: WPAccount?
 
     let LanguageIDKey = "lang_id"
@@ -33,23 +32,36 @@ import WordPressShared
     let XMLRPCKey = "xmlrpc"
     let BlogIDKey = "blogid"
     let URLKey = "url"
+    let nonAlphanumericCharacterSet = NSCharacterSet.alphanumerics.inverted
 
+    override var sourceTag: SupportSourceTag {
+        get {
+            return .wpComSignup
+        }
+    }
 
     /// A convenience method for obtaining an instance of the controller from a storyboard.
     ///
     class func controller() -> SignupViewController {
-        let storyboard = UIStoryboard(name: "Signin", bundle: NSBundle.mainBundle())
-        let controller = storyboard.instantiateViewControllerWithIdentifier("SignupViewController") as! SignupViewController
+        let storyboard = UIStoryboard(name: "Login", bundle: Bundle.main)
+        let controller = storyboard.instantiateViewController(withIdentifier: "SignupViewController") as! SignupViewController
         return controller
     }
 
 
     // MARK: - Lifecycle Methods
 
+    required init?(coder aDecoder: NSCoder) {
+        super.init(coder: aDecoder)
+
+        WPAppAnalytics.track(.createAccountInitiated)
+    }
+
 
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        setupStyles()
         localizeControls()
         configureTermsButtonText()
         setupOnePasswordButtonIfNeeded()
@@ -57,7 +69,7 @@ import WordPressShared
     }
 
 
-    override func viewWillAppear(animated: Bool) {
+    override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
 
         // Update special case login fields.
@@ -69,14 +81,14 @@ import WordPressShared
     }
 
 
-    override func viewDidAppear(animated: Bool) {
+    override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
 
-        registerForKeyboardEvents(keyboardWillShowAction: #selector(SignupViewController.handleKeyboardWillShow(_:)),
-                                  keyboardWillHideAction: #selector(SignupViewController.handleKeyboardWillHide(_:)))
+        registerForKeyboardEvents(keyboardWillShowAction: #selector(handleKeyboardWillShow(_:)),
+                                  keyboardWillHideAction: #selector(handleKeyboardWillHide(_:)))
     }
 
-    override func viewWillDisappear(animated: Bool) {
+    override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         unregisterForKeyboardEvents()
     }
@@ -95,7 +107,7 @@ import WordPressShared
         // Remove the negative layout adjustment
         topLayoutGuideAdjustmentConstraint.constant = 0
         // Hide the logo
-        logoImageView.hidden = true
+        logoImageView.isHidden = true
         // Remove the title label to also remove unwanted constraints.
         if titleLabel.superview != nil {
             titleLabel.removeFromSuperview()
@@ -112,9 +124,9 @@ import WordPressShared
         passwordField.placeholder = NSLocalizedString("Password", comment: "Password placeholder")
         siteURLField.placeholder = NSLocalizedString("Site Address (URL)", comment: "Site Address placeholder")
 
-        let submitButtonTitle = NSLocalizedString("Create Account", comment: "Title of a button. The text should be uppercase.").localizedUppercaseString
-        submitButton.setTitle(submitButtonTitle, forState: .Normal)
-        submitButton.setTitle(submitButtonTitle, forState: .Highlighted)
+        let submitButtonTitle = NSLocalizedString("Create Account", comment: "Title of a button. The text should be uppercase.").localizedUppercase
+        submitButton.setTitle(submitButtonTitle, for: UIControlState())
+        submitButton.setTitle(submitButtonTitle, for: .highlighted)
     }
 
 
@@ -132,38 +144,39 @@ import WordPressShared
     func configureTermsButtonText() {
         let string = NSLocalizedString("By creating an account you agree to the fascinating <u>Terms of Service</u>.",
                                        comment: "Message displayed when a verification code is needed")
-        let options = [
-            NSDocumentTypeDocumentAttribute: NSHTMLTextDocumentType
+        let options: [String: Any] = [
+            NSDocumentTypeDocumentAttribute: NSHTMLTextDocumentType,
+            NSCharacterEncodingDocumentAttribute: String.Encoding.utf8.rawValue
         ]
 
         let styledString = "<style>body {font-family: -apple-system, sans-serif; font-size:13px; color: #ffffff; text-align:center;}</style>" + string
 
-        guard let data = styledString.dataUsingEncoding(NSUTF8StringEncoding),
-            attributedCode = try? NSMutableAttributedString(data: data, options: options, documentAttributes: nil),
-            attributedCodeHighlighted = attributedCode.mutableCopy() as? NSMutableAttributedString
+        guard let data = styledString.data(using: String.Encoding.utf8),
+            let attributedCode = try? NSMutableAttributedString(data: data, options: options, documentAttributes: nil),
+            let attributedCodeHighlighted = attributedCode.mutableCopy() as? NSMutableAttributedString
             else {
                 return
         }
 
         attributedCodeHighlighted.applyForegroundColor(WPNUXUtility.confirmationLabelColor())
 
-        if let titleLabel = termsButton.titleLabel  {
-            titleLabel.lineBreakMode = .ByWordWrapping
-            titleLabel.textAlignment = .Center
+        if let titleLabel = termsButton.titleLabel {
+            titleLabel.lineBreakMode = .byWordWrapping
+            titleLabel.textAlignment = .center
             titleLabel.numberOfLines = 3
         }
 
-        termsButton.setAttributedTitle(attributedCode, forState: .Normal)
-        termsButton.setAttributedTitle(attributedCodeHighlighted, forState: .Highlighted)
+        termsButton.setAttributedTitle(attributedCode, for: UIControlState())
+        termsButton.setAttributedTitle(attributedCodeHighlighted, for: .highlighted)
     }
 
 
     /// Configures the appearance and state of the submit button.
     ///
-    func configureSubmitButton(animating animating: Bool) {
+    func configureSubmitButton(animating: Bool) {
         submitButton.showActivityIndicator(animating)
 
-        submitButton.enabled = (
+        submitButton.isEnabled = (
             !animating &&
                 !loginFields.emailAddress.isEmpty &&
                 !loginFields.username.isEmpty &&
@@ -178,11 +191,11 @@ import WordPressShared
     /// - Parameters:
     ///     - loading: True if the form should be configured to a "loading" state.
     ///
-    func configureLoading(loading: Bool) {
-        emailField.enabled = !loading
-        usernameField.enabled = !loading
-        passwordField.enabled = !loading
-        siteURLField.enabled = !loading
+    func configureLoading(_ loading: Bool) {
+        emailField.isEnabled = !loading
+        usernameField.isEnabled = !loading
+        passwordField.isEnabled = !loading
+        siteURLField.isEnabled = !loading
 
         configureSubmitButton(animating: loading)
         navigationItem.hidesBackButton = loading
@@ -203,6 +216,10 @@ import WordPressShared
 
     // MARK: - Instance Methods
 
+    /// Sets up the view's colors and style
+    open func setupStyles() {
+        WPStyleGuide.configureColorsForSigninView(view)
+    }
 
     /// Whether the view layout should be adjusted for smaller screens
     ///
@@ -210,7 +227,7 @@ import WordPressShared
     /// NOTE: NUX layout assumes a portrait orientation only.
     ///
     func shouldAdjustLayoutForSmallScreen() -> Bool {
-        guard let window = UIApplication.sharedApplication().keyWindow else {
+        guard let window = UIApplication.shared.keyWindow else {
             return false
         }
 
@@ -224,10 +241,10 @@ import WordPressShared
         let message = NSLocalizedString("A site address is required before 1Password can be used.",
                                         comment: "Error message displayed when the user is Signing into a self hosted site and tapped the 1Password Button before typing his siteURL")
 
-        let alertController = UIAlertController(title: nil, message: message, preferredStyle: .Alert)
+        let alertController = UIAlertController(title: nil, message: message, preferredStyle: .alert)
         alertController.addCancelActionWithTitle(NSLocalizedString("OK", comment: "OK Button Title"), handler: nil)
 
-        presentViewController(alertController, animated: true, completion: nil)
+        present(alertController, animated: true, completion: nil)
     }
 
 
@@ -236,7 +253,7 @@ import WordPressShared
     /// - Parameters:
     ///     - message: The message to display
     ///
-    func displayLoginMessage(message: String!) {
+    func displayLoginMessage(_ message: String!) {
         statusLabel.text = message
     }
 
@@ -248,27 +265,12 @@ import WordPressShared
     ///
     /// - Returns: the generated username
     ///
-    func generateSiteTitleFromUsername(username: String) -> String {
+    func generateSiteTitleFromUsername(_ username: String) -> String {
         // Currently, we set the title of a new site to the username of the account.
         // Another possibility would be to name the site "username's blog", which is
         // why this has been placed in a separate method.
         return username
     }
-
-
-    /// Displays an error message in an overlay
-    ///
-    /// - Parameters:
-    ///     - message: The message to display
-    ///
-    func displayErrorMessage(message: String) {
-        let presentingController = navigationController ?? self
-        let controller = SigninErrorViewController.controller()
-        controller.delegate = self
-        controller.presentFromController(presentingController)
-        controller.displayGenericErrorMessage(message)
-    }
-
 
     /// Validates what is entered in the various form fields and, if valid,
     /// proceeds with the submit action.
@@ -278,29 +280,29 @@ import WordPressShared
 
         // Is everything filled out?
         if !SigninHelpers.validateFieldsPopulatedForCreateAccount(loginFields) {
-            displayErrorMessage(NSLocalizedString("Please fill out all the fields", comment: "A short prompt asking the user to properly fill out all login fields."))
+            displayErrorAlert(NSLocalizedString("Please fill out all the fields", comment: "A short prompt asking the user to properly fill out all login fields."), sourceTag: sourceTag)
             return
         }
 
         if !SigninHelpers.validateFieldsForSigninContainNoSpaces(loginFields) {
-            displayErrorMessage(NSLocalizedString("Email, Username, and Site Address cannot contain spaces.", comment: "No spaces error message."))
+            displayErrorAlert(NSLocalizedString("Email, Username, and Site Address cannot contain spaces.", comment: "No spaces error message."), sourceTag: sourceTag)
             return
         }
 
         if !SigninHelpers.validateUsernameMaxLength(loginFields.username) {
-            displayErrorMessage(NSLocalizedString("Username must be less than fifty characters.", comment: "Prompts that the username entered was too long."))
+            displayErrorAlert(NSLocalizedString("Username must be less than fifty characters.", comment: "Prompts that the username entered was too long."), sourceTag: sourceTag)
             usernameField.becomeFirstResponder()
             return
         }
 
         if !loginFields.emailAddress.isValidEmail() {
-            displayErrorMessage(NSLocalizedString("Please enter a valid email address", comment: "A short prompt asking the user to properly fill out all login fields."))
+            displayErrorAlert(NSLocalizedString("Please enter a valid email address", comment: "A short prompt asking the user to properly fill out all login fields."), sourceTag: sourceTag)
             emailField.becomeFirstResponder()
             return
         }
 
         // Remove ".wordpress.com" if it was entered.
-        loginFields.siteUrl = loginFields.siteUrl.componentsSeparatedByString(".")[0]
+        loginFields.siteUrl = loginFields.siteUrl.components(separatedBy: ".")[0]
 
         configureLoading(true)
 
@@ -336,11 +338,11 @@ import WordPressShared
             self.dismiss()
         }
 
-        let failureBlock = { (error: NSError?) in
+        let failureBlock = { (error: Error?) in
             self.displayLoginMessage("")
             self.configureLoading(false)
-            if let error = error {
-                self.displayError(error)
+            if let error = error as NSError? {
+                self.displayError(error, sourceTag: self.sourceTag)
             }
         }
 
@@ -362,25 +364,25 @@ import WordPressShared
     /// - Paramaters:
     ///     - status: SignupStatus
     ///
-    func displayLoginMessageForStatus(status: SignupStatus) {
+    func displayLoginMessageForStatus(_ status: SignupStatus) {
         switch status {
-        case .Validating :
+        case .validating :
             displayLoginMessage(NSLocalizedString("Validating", comment: "Short status message shown to the user when validating a new blog's name."))
             break
 
-        case .CreatingUser :
+        case .creatingUser :
             displayLoginMessage(NSLocalizedString("Creating account", comment: "Brief status message shown to the user when creating a new wpcom account."))
             break
 
-        case .Authenticating :
+        case .authenticating :
             displayLoginMessage(NSLocalizedString("Authenticating", comment: "Brief status message shown when signing into a newly created blog and account."))
             break
 
-        case .CreatingBlog :
+        case .creatingBlog :
             displayLoginMessage(NSLocalizedString("Creating site", comment: "Short status message shown while a new site is being created for a new user."))
             break
 
-        case .Syncing :
+        case .syncing :
             displayLoginMessage(NSLocalizedString("Syncing account information", comment: "Short status message shown while blog and account information is being synced."))
             break
 
@@ -391,7 +393,12 @@ import WordPressShared
     // MARK: - Actions
 
 
-    @IBAction func handleTextFieldDidChange(sender: UITextField) {
+    @IBAction func handleTextFieldDidChange(_ sender: UITextField) {
+        // Ensure that username and site fields are lower cased.
+        if sender == usernameField || sender == siteURLField {
+            sender.text = sender.text?.lowercased()
+        }
+
         loginFields.emailAddress = emailField.nonNilTrimmedText()
         loginFields.username = usernameField.nonNilTrimmedText()
         loginFields.password = passwordField.nonNilTrimmedText()
@@ -401,24 +408,24 @@ import WordPressShared
     }
 
 
-    @IBAction func handleSubmitButtonTapped(sender: UIButton) {
+    @IBAction func handleSubmitButtonTapped(_ sender: UIButton) {
         validateForm()
     }
 
 
-    func handleOnePasswordButtonTapped(sender: UIButton) {
+    func handleOnePasswordButtonTapped(_ sender: UIButton) {
         view.endEditing(true)
 
-        OnePasswordFacade().createLoginForURLString(WPOnePasswordWordPressComURL,
+        OnePasswordFacade().createLogin(forURLString: WPOnePasswordWordPressComURL,
                                                     username: loginFields.username,
                                                     password: loginFields.password,
-                                                    forViewController: self,
+                                                    for: self,
                                                     sender: sender,
-                                                    completion: { (username, password, error: NSError?) in
-                                                        if let error = error {
+                                                    completion: { (username, password, error: Error?) in
+                                                        if let error = error as NSError? {
                                                             if error.code != WPOnePasswordErrorCodeCancelledByUser {
-                                                                DDLogSwift.logError("Failed to use 1Password App Extension to save a new Login: \(error)")
-                                                                WPAnalytics.track(.OnePasswordFailed)
+                                                                DDLogError("Failed to use 1Password App Extension to save a new Login: \(error)")
+                                                                WPAnalytics.track(.onePasswordFailed)
                                                             }
                                                             return
                                                         }
@@ -428,10 +435,10 @@ import WordPressShared
                                                         }
                                                         if let password = password {
                                                             self.loginFields.password = password
-                                                            self.usernameField.text = password
+                                                            self.passwordField.text = password
                                                         }
 
-                                                        WPAnalytics.track(.OnePasswordSignup)
+                                                        WPAnalytics.track(.onePasswordSignup)
 
                                                         // Note: Since the Site field is right below the 1Password field, let's continue with the edition flow
                                                         // and make the SiteAddress Field the first responder.
@@ -441,44 +448,44 @@ import WordPressShared
     }
 
 
-    @IBAction func handleTermsOfServiceButtonTapped(sender: UIButton) {
-        let url = NSURL(string: WPAutomatticTermsOfServiceURL)
-        let controller = WPWebViewController(URL: url)
-        let navController = RotationAwareNavigationViewController(rootViewController: controller)
-        presentViewController(navController, animated: true, completion: nil)
+    @IBAction func handleTermsOfServiceButtonTapped(_ sender: UIButton) {
+        let url = URL(string: WPAutomatticTermsOfServiceURL)
+        let controller = WPWebViewController(url: url)
+        let navController = RotationAwareNavigationViewController(rootViewController: controller!)
+        present(navController, animated: true, completion: nil)
     }
 
 
     // MARK: - Keyboard Notifications
 
 
-    func handleKeyboardWillShow(notification: NSNotification) {
+    func handleKeyboardWillShow(_ notification: Foundation.Notification) {
         keyboardWillShow(notification)
     }
 
 
-    func handleKeyboardWillHide(notification: NSNotification) {
+    func handleKeyboardWillHide(_ notification: Foundation.Notification) {
         keyboardWillHide(notification)
     }
 }
 
 
 extension SignupViewController: UITextFieldDelegate {
-    func textFieldShouldReturn(textField: UITextField) -> Bool {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         if textField == emailField {
             usernameField.becomeFirstResponder()
         } else if textField == usernameField {
             passwordField.becomeFirstResponder()
         } else if textField == passwordField {
             siteURLField.becomeFirstResponder()
-        } else if submitButton.enabled {
+        } else if submitButton.isEnabled {
             validateForm()
         }
         return true
     }
 
 
-    func textFieldShouldEndEditing(textField: UITextField) -> Bool {
+    func textFieldShouldEndEditing(_ textField: UITextField) -> Bool {
         if textField != emailField || didCorrectEmailOnce {
             return true
         }
@@ -497,7 +504,7 @@ extension SignupViewController: UITextFieldDelegate {
     }
 
 
-    func textFieldDidEndEditing(textField: UITextField) {
+    func textFieldDidEndEditing(_ textField: UITextField) {
         if textField != usernameField || userDefinedSiteAddress {
             return
         }
@@ -508,10 +515,17 @@ extension SignupViewController: UITextFieldDelegate {
     }
 
 
-    func textField(textField: UITextField, shouldChangeCharactersInRange range: NSRange, replacementString string: String) -> Bool {
+    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
         // Disallow spaces except for the password field
         if string == " " && (textField == emailField || textField == usernameField || textField == siteURLField) {
             return false
+        }
+
+        // Disallow punctuation in username and site names
+        if (textField == usernameField || textField == siteURLField) {
+            if (string as NSString).rangeOfCharacter(from: nonAlphanumericCharacterSet).location != NSNotFound {
+                return false
+            }
         }
 
         if textField == siteURLField {

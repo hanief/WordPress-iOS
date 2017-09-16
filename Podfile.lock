@@ -1,5 +1,5 @@
 PODS:
-  - 1PasswordExtension (1.8.1)
+  - 1PasswordExtension (1.8.4)
   - AFNetworking (3.1.0):
     - AFNetworking/NSURLSession (= 3.1.0)
     - AFNetworking/Reachability (= 3.1.0)
@@ -15,254 +15,180 @@ PODS:
   - AFNetworking/Serialization (3.1.0)
   - AFNetworking/UIKit (3.1.0):
     - AFNetworking/NSURLSession
-  - Alamofire (3.5.1)
-  - Automattic-Tracks-iOS (0.1.1):
-    - CocoaLumberjack (~> 2.2.0)
+  - Alamofire (4.0.1)
+  - Automattic-Tracks-iOS (0.2.0):
+    - CocoaLumberjack (~> 3.2.0)
     - Reachability (~> 3.1)
     - UIDeviceIdentifier (~> 0.4)
-  - BuddyBuildSDK (1.0.12)
-  - CocoaLumberjack (2.2.0):
-    - CocoaLumberjack/Default (= 2.2.0)
-    - CocoaLumberjack/Extensions (= 2.2.0)
-  - CocoaLumberjack/Core (2.2.0)
-  - CocoaLumberjack/Default (2.2.0):
-    - CocoaLumberjack/Core
-  - CocoaLumberjack/Extensions (2.2.0):
+  - BuddyBuildSDK (1.0.16)
+  - CocoaLumberjack (3.2.1):
+    - CocoaLumberjack/Default (= 3.2.1)
+    - CocoaLumberjack/Extensions (= 3.2.1)
+  - CocoaLumberjack/Default (3.2.1)
+  - CocoaLumberjack/Extensions (3.2.1):
     - CocoaLumberjack/Default
-  - Crashlytics (3.8.3):
+  - Crashlytics (3.8.5):
     - Fabric (~> 1.6.3)
-  - DTCoreText (1.6.16):
-    - DTFoundation/Core (~> 1.7.5)
-    - DTFoundation/DTAnimatedGIF (~> 1.7.5)
-    - DTFoundation/DTHTMLParser (~> 1.7.5)
-    - DTFoundation/UIKit (~> 1.7.5)
-  - DTFoundation/Core (1.7.11)
-  - DTFoundation/DTAnimatedGIF (1.7.11)
-  - DTFoundation/DTHTMLParser (1.7.11):
-    - DTFoundation/Core
-  - DTFoundation/UIKit (1.7.11):
-    - DTFoundation/Core
-  - Expecta (1.0.5)
-  - Fabric (1.6.11)
+  - Expecta (1.0.6)
+  - Fabric (1.6.12)
   - FLAnimatedImage (1.0.12)
-  - FormatterKit (1.8.1):
-    - FormatterKit/AddressFormatter (= 1.8.1)
-    - FormatterKit/ArrayFormatter (= 1.8.1)
-    - FormatterKit/ColorFormatter (= 1.8.1)
-    - FormatterKit/LocationFormatter (= 1.8.1)
-    - FormatterKit/NameFormatter (= 1.8.1)
-    - FormatterKit/OrdinalNumberFormatter (= 1.8.1)
-    - FormatterKit/Resources (= 1.8.1)
-    - FormatterKit/TimeIntervalFormatter (= 1.8.1)
-    - FormatterKit/UnitOfInformationFormatter (= 1.8.1)
-    - FormatterKit/URLRequestFormatter (= 1.8.1)
-  - FormatterKit/AddressFormatter (1.8.1):
+  - FormatterKit/Resources (1.8.2)
+  - FormatterKit/TimeIntervalFormatter (1.8.2):
     - FormatterKit/Resources
-  - FormatterKit/ArrayFormatter (1.8.1):
-    - FormatterKit/Resources
-  - FormatterKit/ColorFormatter (1.8.1):
-    - FormatterKit/Resources
-  - FormatterKit/LocationFormatter (1.8.1):
-    - FormatterKit/Resources
-  - FormatterKit/NameFormatter (1.8.1):
-    - FormatterKit/Resources
-  - FormatterKit/OrdinalNumberFormatter (1.8.1):
-    - FormatterKit/Resources
-  - FormatterKit/Resources (1.8.1)
-  - FormatterKit/TimeIntervalFormatter (1.8.1):
-    - FormatterKit/Resources
-  - FormatterKit/UnitOfInformationFormatter (1.8.1):
-    - FormatterKit/Resources
-  - FormatterKit/URLRequestFormatter (1.8.1):
-    - FormatterKit/Resources
-  - Gridicons (0.2)
-  - Helpshift (5.7.1)
-  - HockeySDK (3.8.6):
-    - HockeySDK/AllFeaturesLib (= 3.8.6)
-  - HockeySDK/AllFeaturesLib (3.8.6)
-  - Lookback (1.4.1):
-    - PDKTZipArchive
-  - Mixpanel (2.9.4):
-    - Mixpanel/Mixpanel (= 2.9.4)
-  - Mixpanel/Mixpanel (2.9.4)
-  - MRProgress (0.7.0):
-    - MRProgress/ActivityIndicator (= 0.7.0)
-    - MRProgress/Blur (= 0.7.0)
-    - MRProgress/Circular (= 0.7.0)
-    - MRProgress/Icons (= 0.7.0)
-    - MRProgress/NavigationBarProgress (= 0.7.0)
-    - MRProgress/Overlay (= 0.7.0)
-  - MRProgress/ActivityIndicator (0.7.0):
+  - Gridicons (0.10)
+  - HockeySDK (4.1.6):
+    - HockeySDK/DefaultLib (= 4.1.6)
+  - HockeySDK/DefaultLib (4.1.6)
+  - lottie-ios (1.5.1)
+  - MGSwipeTableCell (1.6.0)
+  - MRProgress (0.8.3):
+    - MRProgress/ActivityIndicator (= 0.8.3)
+    - MRProgress/Blur (= 0.8.3)
+    - MRProgress/Circular (= 0.8.3)
+    - MRProgress/Icons (= 0.8.3)
+    - MRProgress/NavigationBarProgress (= 0.8.3)
+    - MRProgress/Overlay (= 0.8.3)
+  - MRProgress/ActivityIndicator (0.8.3):
     - MRProgress/Stopable
-  - MRProgress/Blur (0.7.0):
+  - MRProgress/Blur (0.8.3):
     - MRProgress/Helper
-  - MRProgress/Circular (0.7.0):
+  - MRProgress/Circular (0.8.3):
     - MRProgress/Helper
     - MRProgress/ProgressBaseClass
     - MRProgress/Stopable
-  - MRProgress/Helper (0.7.0)
-  - MRProgress/Icons (0.7.0)
-  - MRProgress/NavigationBarProgress (0.7.0):
+  - MRProgress/Helper (0.8.3)
+  - MRProgress/Icons (0.8.3)
+  - MRProgress/NavigationBarProgress (0.8.3):
     - MRProgress/ProgressBaseClass
-  - MRProgress/Overlay (0.7.0):
+  - MRProgress/Overlay (0.8.3):
     - MRProgress/ActivityIndicator
     - MRProgress/Blur
     - MRProgress/Circular
     - MRProgress/Helper
     - MRProgress/Icons
-  - MRProgress/ProgressBaseClass (0.7.0)
-  - MRProgress/Stopable (0.7.0):
+  - MRProgress/ProgressBaseClass (0.8.3)
+  - MRProgress/Stopable (0.8.3):
     - MRProgress/Helper
-  - Nimble (4.0.1)
+  - Nimble (7.0.1)
   - NSObject-SafeExpectations (0.0.2)
   - NSURL+IDN (0.3)
-  - OCMock (3.1.2)
-  - OHHTTPStubs (4.6.0):
-    - OHHTTPStubs/Default (= 4.6.0)
-  - OHHTTPStubs/Core (4.6.0)
-  - OHHTTPStubs/Default (4.6.0):
+  - OCMock (3.4)
+  - OHHTTPStubs (6.0.0):
+    - OHHTTPStubs/Default (= 6.0.0)
+  - OHHTTPStubs/Core (6.0.0)
+  - OHHTTPStubs/Default (6.0.0):
     - OHHTTPStubs/Core
     - OHHTTPStubs/JSON
     - OHHTTPStubs/NSURLSession
     - OHHTTPStubs/OHPathHelpers
-  - OHHTTPStubs/JSON (4.6.0):
+  - OHHTTPStubs/JSON (6.0.0):
     - OHHTTPStubs/Core
-  - OHHTTPStubs/NSURLSession (4.6.0):
+  - OHHTTPStubs/NSURLSession (6.0.0):
     - OHHTTPStubs/Core
-  - OHHTTPStubs/OHPathHelpers (4.6.0)
-  - OHHTTPStubs/Swift (4.6.0):
-    - OHHTTPStubs/Core
-  - PDKTZipArchive (0.4.1)
+  - OHHTTPStubs/OHPathHelpers (6.0.0)
+  - OHHTTPStubs/Swift (6.0.0):
+    - OHHTTPStubs/Default
   - Reachability (3.2)
-  - Specta (1.0.5)
-  - SVProgressHUD (1.1.3)
+  - Specta (1.0.6)
+  - Starscream (2.1.0)
+  - SVProgressHUD (2.1.2)
   - UIDeviceIdentifier (0.5.0)
-  - WordPress-AppbotX (1.0.6)
-  - WordPress-Aztec-iOS (0.3.0):
-    - Gridicons (= 0.2)
-  - WordPress-iOS-Editor (1.8.1):
-    - CocoaLumberjack (~> 2.2.0)
+  - WordPress-Aztec-iOS (1.0.0-beta.10)
+  - WordPress-iOS-Editor (1.9.4):
+    - CocoaLumberjack (~> 3.2.0)
     - NSObject-SafeExpectations (~> 0.0.2)
-    - WordPressCom-Analytics-iOS (~> 0.1.0)
-  - WordPress-iOS-Shared (0.7.0):
-    - CocoaLumberjack (~> 2.2.0)
-  - WordPressCom-Analytics-iOS (0.1.21)
-  - WordPressCom-Stats-iOS (0.8.0):
-    - AFNetworking (~> 3.1.0)
-    - CocoaLumberjack (~> 2.2.0)
-    - NSObject-SafeExpectations (~> 0.0.2)
-    - WordPress-iOS-Shared (~> 0.5)
-    - WordPressCom-Analytics-iOS (~> 0.1.4)
-  - WordPressComKit (0.0.5):
-    - Alamofire (~> 3.0)
-  - WPMediaPicker (0.10.2)
-  - wpxmlrpc (0.8.2)
+  - WordPressComKit (0.0.6):
+    - Alamofire (= 4.0.1)
+  - WPMediaPicker (0.20)
+  - wpxmlrpc (0.8.3)
 
 DEPENDENCIES:
-  - 1PasswordExtension (= 1.8.1)
+  - 1PasswordExtension (= 1.8.4)
   - AFNetworking (= 3.1.0)
-  - Automattic-Tracks-iOS (from `https://github.com/Automattic/Automattic-Tracks-iOS.git`, tag `0.1.1`)
-  - BuddyBuildSDK (~> 1.0.11)
-  - CocoaLumberjack (~> 2.2.0)
-  - Crashlytics
-  - DTCoreText (= 1.6.16)
-  - Expecta (= 1.0.5)
-  - FLAnimatedImage (~> 1.0)
-  - FormatterKit (~> 1.8.1)
-  - Gridicons (from `https://github.com/Automattic/Gridicons-iOS.git`, commit `8bd04e18eddaaf36810887c94837571e68f7cc24`)
-  - Helpshift (~> 5.7.1)
-  - HockeySDK (~> 3.8.0)
-  - Lookback (= 1.4.1)
-  - Mixpanel (= 2.9.4)
-  - MRProgress (~> 0.7.0)
-  - Nimble (~> 4.0.0)
+  - Automattic-Tracks-iOS (from `https://github.com/Automattic/Automattic-Tracks-iOS.git`, tag `0.2.0`)
+  - BuddyBuildSDK (= 1.0.16)
+  - CocoaLumberjack (= 3.2.1)
+  - Crashlytics (= 3.8.5)
+  - Expecta (= 1.0.6)
+  - FLAnimatedImage (= 1.0.12)
+  - FormatterKit/TimeIntervalFormatter (= 1.8.2)
+  - Gridicons (= 0.10)
+  - HockeySDK (= 4.1.6)
+  - lottie-ios (= 1.5.1)
+  - MGSwipeTableCell (= 1.6.0)
+  - MRProgress (= 0.8.3)
+  - Nimble (~> 7.0.0)
   - NSObject-SafeExpectations (= 0.0.2)
   - NSURL+IDN (= 0.3)
-  - OCMock (= 3.1.2)
-  - OHHTTPStubs (~> 4.6.0)
-  - OHHTTPStubs/Swift (~> 4.6.0)
+  - OCMock (~> 3.4)
+  - OHHTTPStubs
+  - OHHTTPStubs/Swift
   - Reachability (= 3.2)
-  - Specta (= 1.0.5)
-  - SVProgressHUD (~> 1.1.3)
-  - UIDeviceIdentifier (~> 0.1)
-  - WordPress-AppbotX (from `https://github.com/wordpress-mobile/appbotx.git`, commit `479d05f7d6b963c9b44040e6ea9f190e8bd9a47a`)
-  - WordPress-Aztec-iOS (from `https://github.com/wordpress-mobile/WordPress-Aztec-iOS.git`, commit `7d02c77349245c6e4d3bcdf63a878f90eb4a4e39`)
-  - WordPress-iOS-Editor (= 1.8.1)
-  - WordPress-iOS-Shared (= 0.7.0)
-  - WordPressCom-Analytics-iOS (= 0.1.21)
-  - WordPressCom-Stats-iOS (= 0.8.0)
-  - WordPressComKit (= 0.0.5)
-  - WPMediaPicker (~> 0.10.2)
-  - wpxmlrpc (~> 0.8)
+  - Specta (= 1.0.6)
+  - Starscream (= 2.1.0)
+  - SVProgressHUD (= 2.1.2)
+  - UIDeviceIdentifier (~> 0.4)
+  - WordPress-Aztec-iOS (from `https://github.com/wordpress-mobile/AztecEditor-iOS.git`, commit `76e94b6bd8358a4ec4d60a568e4dd02895315a61`)
+  - WordPress-iOS-Editor (= 1.9.4)
+  - WordPressComKit (from `https://github.com/Automattic/WordPressComKit.git`, tag `0.0.6`)
+  - WPMediaPicker (= 0.20)
+  - wpxmlrpc (= 0.8.3)
 
 EXTERNAL SOURCES:
   Automattic-Tracks-iOS:
     :git: https://github.com/Automattic/Automattic-Tracks-iOS.git
-    :tag: 0.1.1
-  Gridicons:
-    :commit: 8bd04e18eddaaf36810887c94837571e68f7cc24
-    :git: https://github.com/Automattic/Gridicons-iOS.git
-  WordPress-AppbotX:
-    :commit: 479d05f7d6b963c9b44040e6ea9f190e8bd9a47a
-    :git: https://github.com/wordpress-mobile/appbotx.git
+    :tag: 0.2.0
   WordPress-Aztec-iOS:
-    :commit: 7d02c77349245c6e4d3bcdf63a878f90eb4a4e39
-    :git: https://github.com/wordpress-mobile/WordPress-Aztec-iOS.git
+    :commit: 76e94b6bd8358a4ec4d60a568e4dd02895315a61
+    :git: https://github.com/wordpress-mobile/AztecEditor-iOS.git
+  WordPressComKit:
+    :git: https://github.com/Automattic/WordPressComKit.git
+    :tag: 0.0.6
 
 CHECKOUT OPTIONS:
   Automattic-Tracks-iOS:
     :git: https://github.com/Automattic/Automattic-Tracks-iOS.git
-    :tag: 0.1.1
-  Gridicons:
-    :commit: 8bd04e18eddaaf36810887c94837571e68f7cc24
-    :git: https://github.com/Automattic/Gridicons-iOS.git
-  WordPress-AppbotX:
-    :commit: 479d05f7d6b963c9b44040e6ea9f190e8bd9a47a
-    :git: https://github.com/wordpress-mobile/appbotx.git
+    :tag: 0.2.0
   WordPress-Aztec-iOS:
-    :commit: 7d02c77349245c6e4d3bcdf63a878f90eb4a4e39
-    :git: https://github.com/wordpress-mobile/WordPress-Aztec-iOS.git
+    :commit: 76e94b6bd8358a4ec4d60a568e4dd02895315a61
+    :git: https://github.com/wordpress-mobile/AztecEditor-iOS.git
+  WordPressComKit:
+    :git: https://github.com/Automattic/WordPressComKit.git
+    :tag: 0.0.6
 
 SPEC CHECKSUMS:
-  1PasswordExtension: 00d6f4caae77c19ba33045b8569fbeb9689f0d1d
+  1PasswordExtension: e775a29310c65851e5a6cec1afc349ab4e334e47
   AFNetworking: 5e0e199f73d8626b11e79750991f5d173d1f8b67
-  Alamofire: 0dfba1184a543e2aa160f4e39cac4e8aba48d223
-  Automattic-Tracks-iOS: b130494633946a970ffe70c02461cf61c2bf488a
-  BuddyBuildSDK: f4682598772ae66c9ef5554d2d78d0a19fb413a0
-  CocoaLumberjack: 17fe8581f84914d5d7e6360f7c70022b173c3ae0
-  Crashlytics: 2b6dbe138a42395577cfa73dfa1aa7248cadf39e
-  DTCoreText: 934a16fe9ffdd169c96261721b39dc312b75713d
-  DTFoundation: 0ef29c70a9814e15518694862bd739347abe2a50
-  Expecta: e1c022fcd33910b6be89c291d2775b3fe27a89fe
-  Fabric: 5911403591946b8228ab1c51d98f1d7137e863c6
+  Alamofire: 7682d43245de14874acd142ec137b144aa1dd335
+  Automattic-Tracks-iOS: edc4365d31602490af88dbed181b0b666cbdcf75
+  BuddyBuildSDK: 2c5469eee2981a3365386e46393e97068d75e4f4
+  CocoaLumberjack: 2800c03334042fe80589423c8d80e582dcaec482
+  Crashlytics: dfbae35ef22ca189240d230ad501feea4ee85d2d
+  Expecta: 3b6bd90a64b9a1dcb0b70aa0e10a7f8f631667d5
+  Fabric: f050464eac45a2ce5a8e6e6a07e977c0df32fe28
   FLAnimatedImage: 4a0b56255d9b05f18b6dd7ee06871be5d3b89e31
-  FormatterKit: 11ad17b983200629246a5a466f6f1bfa2df823cb
-  Gridicons: 5c33065054b19e56a47d252b52e321746b97a414
-  Helpshift: 48ee4b24dc5f0ae7d1dfd8dded6eea327069a014
-  HockeySDK: ab68303eec6680f6b539de65d747742dd276e934
-  Lookback: 37c23f97894612f6eccc215440c8f990fbb5a607
-  Mixpanel: 80d2ca9bb38ae91c1044d738e80fe448377ac89f
-  MRProgress: 1cb0051b678be4a2ef4881414cd316768fc70028
-  Nimble: 0f3c8b8b084cda391209c3c5efbb48bedeeb920a
+  FormatterKit: 4b8f29acc9b872d5d12a63efb560661e8f2e1b98
+  Gridicons: e661b35e7d4f0ca79e8b2a2072c0081b91b5d1e0
+  HockeySDK: 95db557d54489a570dcdefae0d02f98eecc279a3
+  lottie-ios: f680a7c4cb7a567ecf258fde0f967913aff111b8
+  MGSwipeTableCell: 6e1994f1eb31c76e76f70a8bc39de3c42cf5cd38
+  MRProgress: 16de7cc9f347e8846797a770db102a323fe7ef09
+  Nimble: 657d000e11df8aebe27cdaf9d244de7f30ed87f7
   NSObject-SafeExpectations: 7d7f48df90df4e11da7cfe86b64f45eff7a7f521
   NSURL+IDN: 82355a0afd532fe1de08f6417c134b49b1a1c4b3
-  OCMock: a10ea9f0a6e921651f96f78b6faee95ebc813b92
-  OHHTTPStubs: cb1aefbbeb4de4e741644455d4b945538e5248a2
-  PDKTZipArchive: 22bbab52b49f46a3adf1acf134311fd252c43feb
+  OCMock: 35ae71d6a8fcc1b59434d561d1520b9dd4f15765
+  OHHTTPStubs: 752f9b11fd810a15162d50f11c06ff94f8e012eb
   Reachability: 33e18b67625424e47b6cde6d202dce689ad7af96
-  Specta: ac94d110b865115fe60ff2c6d7281053c6f8e8a2
-  SVProgressHUD: 748080e4f36e603f6c02aec292664239df5279c1
+  Specta: f506f3a8361de16bc0dcf3b17b75e269072ba465
+  Starscream: 168fd64c345fb2dea71b0a869c482aeffcf866e4
+  SVProgressHUD: c404a55d78acbeb7ebb78b76d3faf986475a6994
   UIDeviceIdentifier: a959a6d4f51036b4180dd31fb26483a820f1cc46
-  WordPress-AppbotX: b5abc0ba45e3da5827f84e9f346c963180f1b545
-  WordPress-Aztec-iOS: 49c682caa55e69bfbe12545dc1f448207060f6f4
-  WordPress-iOS-Editor: 3118f5d6b142b6bf322f3393a7dd98a28bca68cb
-  WordPress-iOS-Shared: 4bec543bac6543480b10d904bea122dcba43cc37
-  WordPressCom-Analytics-iOS: ee6cc3a4feb63cebba167ce762c6e12c0b7b6671
-  WordPressCom-Stats-iOS: 7c961a7780a695f54db5431537c16615682cdf32
-  WordPressComKit: 4dc52eebc508b8e056d8bf8e931a7be95d467e3b
-  WPMediaPicker: 9ba8c29a1de4b07696356f541c01eeaa6dd14c47
-  wpxmlrpc: 38623cc415117914d6ab5bf2ab8a57a4076cc469
+  WordPress-Aztec-iOS: c47f4c93a01944a603ddcde02811cfb3227d0a1b
+  WordPress-iOS-Editor: 3792b28f6b139150b37363e450d3c8769137eaca
+  WordPressComKit: 119ae1d20bfb090769274732b51e7bd186a96f7e
+  WPMediaPicker: 19662ba400d5ad7e95c56e581a36f4287b558305
+  wpxmlrpc: bfc572f62ce7ee897f6f38b098d2ba08732ecef4
 
-PODFILE CHECKSUM: e55ed7f68c9c856f548d0023166d945a0ac909d6
+PODFILE CHECKSUM: 641f928c6f8cfab62ae2235961842d08a867f353
 
-COCOAPODS: 1.1.1
+COCOAPODS: 1.3.1

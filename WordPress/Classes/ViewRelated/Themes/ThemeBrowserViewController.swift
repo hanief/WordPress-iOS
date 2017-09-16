@@ -1,5 +1,6 @@
 import Foundation
-import WordPressComAnalytics
+import CocoaLumberjack
+import WordPressShared.WPAnalytics
 import WordPressShared.WPStyleGuide
 import WordPressShared.WPNoResultsView
 
@@ -7,34 +8,33 @@ import WordPressShared.WPNoResultsView
  *  @brief      Support for filtering themes by purchasability
  *  @details    Currently purchasing themes via native apps is unsupported
  */
-public enum ThemeType
-{
-    case All
-    case Free
-    case Premium
+public enum ThemeType {
+    case all
+    case free
+    case premium
 
     static let mayPurchase = false
 
-    static let types = [All, Free, Premium]
+    static let types = [all, free, premium]
 
     var title: String {
         switch self {
-        case .All:
+        case .all:
             return NSLocalizedString("All", comment: "Browse all themes selection title")
-        case .Free:
+        case .free:
             return NSLocalizedString("Free", comment: "Browse free themes selection title")
-        case .Premium:
+        case .premium:
             return NSLocalizedString("Premium", comment: "Browse premium themes selection title")
         }
     }
 
     var predicate: NSPredicate? {
         switch self {
-        case .All:
+        case .all:
             return nil
-        case .Free:
+        case .free:
             return NSPredicate(format: "premium == 0")
-        case .Premium:
+        case .premium:
             return NSPredicate(format: "premium == 1")
         }
     }
@@ -44,61 +44,73 @@ public enum ThemeType
  *  @brief      Publicly exposed theme interaction support
  *  @details    Held as weak reference by owned subviews
  */
-public protocol ThemePresenter: class
-{
+public protocol ThemePresenter: class {
     var filterType: ThemeType { get set }
 
     var screenshotWidth: Int { get }
 
     func currentTheme() -> Theme?
-    func activateTheme(theme: Theme?)
+    func activateTheme(_ theme: Theme?)
 
-    func presentCustomizeForTheme(theme: Theme?)
-    func presentPreviewForTheme(theme: Theme?)
-    func presentDetailsForTheme(theme: Theme?)
-    func presentSupportForTheme(theme: Theme?)
-    func presentViewForTheme(theme: Theme?)
+    func presentCustomizeForTheme(_ theme: Theme?)
+    func presentPreviewForTheme(_ theme: Theme?)
+    func presentDetailsForTheme(_ theme: Theme?)
+    func presentSupportForTheme(_ theme: Theme?)
+    func presentViewForTheme(_ theme: Theme?)
 }
 
 /// Invalidates the layout whenever the collection view's bounds change
-@objc public class ThemeBrowserCollectionViewLayout: UICollectionViewFlowLayout {
-    public override func shouldInvalidateLayoutForBoundsChange(newBounds: CGRect) -> Bool {
+@objc open class ThemeBrowserCollectionViewLayout: UICollectionViewFlowLayout {
+    open override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
         return shouldInvalidateForNewBounds(newBounds)
     }
 
-    public override func invalidationContextForBoundsChange(newBounds: CGRect) -> UICollectionViewFlowLayoutInvalidationContext {
-        let context = super.invalidationContextForBoundsChange(newBounds) as! UICollectionViewFlowLayoutInvalidationContext
+    open override func invalidationContext(forBoundsChange newBounds: CGRect) -> UICollectionViewFlowLayoutInvalidationContext {
+        let context = super.invalidationContext(forBoundsChange: newBounds) as! UICollectionViewFlowLayoutInvalidationContext
         context.invalidateFlowLayoutDelegateMetrics = shouldInvalidateForNewBounds(newBounds)
 
         return context
     }
 
-    private func shouldInvalidateForNewBounds(newBounds: CGRect) -> Bool {
+    fileprivate func shouldInvalidateForNewBounds(_ newBounds: CGRect) -> Bool {
         guard let collectionView = collectionView else { return false }
 
         return (newBounds.width != collectionView.bounds.width || newBounds.height != collectionView.bounds.height)
     }
 }
 
-@objc public class ThemeBrowserViewController : UIViewController, UICollectionViewDataSource, UICollectionViewDelegate, UICollectionViewDelegateFlowLayout, NSFetchedResultsControllerDelegate, UISearchControllerDelegate, UISearchResultsUpdating, ThemePresenter, WPContentSyncHelperDelegate
-{
+@objc open class ThemeBrowserViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegate, UICollectionViewDelegateFlowLayout, NSFetchedResultsControllerDelegate, UISearchControllerDelegate, UISearchResultsUpdating, ThemePresenter, WPContentSyncHelperDelegate {
+
+    // MARK: - Constants
+
+    static let reuseIdentifierForThemesHeader = "ThemeBrowserSectionHeaderViewThemes"
+    static let reuseIdentifierForCustomThemesHeader = "ThemeBrowserSectionHeaderViewCustomThemes"
+
     // MARK: - Properties: must be set by parent
 
     /**
      *  @brief      The blog this VC will work with.
      *  @details    Must be set by the creator of this VC.
      */
-    public var blog : Blog!
+    open var blog: Blog!
 
     // MARK: - Properties
 
     @IBOutlet weak var collectionView: UICollectionView!
 
     /**
-     *  @brief      The FRC this VC will use to display filtered content.
+     *  @brief      The FRCs this VC will use to display filtered content.
      */
-    private lazy var themesController: NSFetchedResultsController = {
-        let fetchRequest = NSFetchRequest(entityName: Theme.entityName())
+    fileprivate lazy var themesController: NSFetchedResultsController<NSFetchRequestResult> = {
+        return self.createThemesFetchedResultsController()
+    }()
+
+    fileprivate lazy var customThemesController: NSFetchedResultsController<NSFetchRequestResult> = {
+        return self.createThemesFetchedResultsController()
+    }()
+
+    fileprivate func createThemesFetchedResultsController() -> NSFetchedResultsController<NSFetchRequestResult> {
+        let fetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: Theme.entityName())
         fetchRequest.fetchBatchSize = 20
         let sort = NSSortDescriptor(key: "order", ascending: true)
         fetchRequest.sortDescriptors = [sort]
@@ -109,14 +121,51 @@ public protocol ThemePresenter: class
         frc.delegate = self
 
         return frc
-    }()
-    private var themesCount: NSInteger {
+    }
+
+    fileprivate var themeCount: NSInteger {
         return themesController.fetchedObjects?.count ?? 0
     }
 
-    private var searchController: UISearchController!
+    fileprivate var customThemeCount: NSInteger {
+        return blog.supports(BlogFeature.customThemes) ? (customThemesController.fetchedObjects?.count ?? 0) : 0
+    }
 
-    private var searchName = "" {
+    // Absolute count of available themes for the site, as it comes from the ThemeService
+
+    fileprivate var totalThemeCount: NSInteger = 0 {
+        didSet {
+            themesHeader?.themeCount = totalThemeCount
+        }
+    }
+
+    fileprivate var totalCustomThemeCount: NSInteger = 0 {
+        didSet {
+            customThemesHeader?.themeCount = totalCustomThemeCount
+        }
+    }
+
+    fileprivate var themesHeader: ThemeBrowserSectionHeaderView? {
+        didSet {
+            themesHeader?.descriptionLabel.text = NSLocalizedString("WordPress.com Themes",
+                                                                    comment: "Title for the WordPress.com themes section, should be the same as in Calypso").localizedUppercase
+            themesHeader?.themeCount = totalThemeCount > 0 ? totalThemeCount : themeCount
+        }
+    }
+
+    fileprivate var customThemesHeader: ThemeBrowserSectionHeaderView? {
+        didSet {
+            customThemesHeader?.descriptionLabel.text = NSLocalizedString("Uploaded themes",
+                                                                          comment: "Title for the user uploaded themes section, should be the same as in Calypso").localizedUppercase
+            customThemesHeader?.themeCount = totalCustomThemeCount > 0 ? totalCustomThemeCount : customThemeCount
+        }
+    }
+
+    fileprivate var hideSectionHeaders: Bool = false
+
+    fileprivate var searchController: UISearchController!
+
+    fileprivate var searchName = "" {
         didSet {
             if searchName != oldValue {
                 fetchThemes()
@@ -125,44 +174,41 @@ public protocol ThemePresenter: class
        }
     }
 
-    private var suspendedSearch = ""
+    fileprivate var suspendedSearch = ""
 
     func resumingSearch() -> Bool {
         return !suspendedSearch.trim().isEmpty
     }
 
-    public var filterType: ThemeType = ThemeType.mayPurchase ? .All : .Free {
-        didSet {
-            if filterType != oldValue {
-                fetchThemes()
-                reloadThemes()
-            }
-        }
-    }
+    open var filterType: ThemeType = ThemeType.mayPurchase ? .all : .free
 
     /**
      *  @brief      Collection view support
      */
 
-    private enum Section
-    {
-        case Search
-        case Info
-        case Themes
+    fileprivate enum Section {
+        case search
+        case info
+        case customThemes
+        case themes
     }
-    private var sections: [Section]!
+    fileprivate var sections: [Section]!
 
-    private func reloadThemes() {
+    fileprivate func reloadThemes() {
         collectionView?.reloadData()
         updateResults()
     }
 
-    private func themeAtIndex(index: Int) -> Theme? {
-        let indexPath = NSIndexPath(forRow: index, inSection: 0)
-        return themesController.objectAtIndexPath(indexPath) as? Theme
+    fileprivate func themeAtIndexPath(_ indexPath: IndexPath) -> Theme? {
+        if sections[indexPath.section] == .themes {
+            return themesController.object(at: IndexPath(row: indexPath.row, section: 0)) as? Theme
+        } else if sections[indexPath.section] == .customThemes {
+            return customThemesController.object(at: IndexPath(row: indexPath.row, section: 0)) as? Theme
+        }
+        return nil
     }
 
-    private lazy var noResultsView: WPNoResultsView = {
+    fileprivate lazy var noResultsView: WPNoResultsView = {
         let noResultsView = WPNoResultsView()
         let drakeImage = UIImage(named: "theme-empty-results")
         noResultsView.accessoryView = UIImageView(image: drakeImage)
@@ -170,16 +216,16 @@ public protocol ThemePresenter: class
         return noResultsView
     }()
 
-    private var noResultsShown: Bool {
+    fileprivate var noResultsShown: Bool {
         return noResultsView.superview != nil
     }
-    private var presentingTheme: Theme?
+    fileprivate var presentingTheme: Theme?
 
     /**
      *  @brief      Load theme screenshots at maximum displayed width
      */
-    public var screenshotWidth: Int = {
-        let windowSize = UIApplication.sharedApplication().keyWindow!.bounds.size
+    open var screenshotWidth: Int = {
+        let windowSize = UIApplication.shared.keyWindow!.bounds.size
         let vWidth = Styles.imageWidthForFrameWidth(windowSize.width)
         let hWidth = Styles.imageWidthForFrameWidth(windowSize.height)
         let maxWidth = Int(max(hWidth, vWidth))
@@ -189,14 +235,15 @@ public protocol ThemePresenter: class
     /**
      *  @brief      The themes service we'll use in this VC and its helpers
      */
-    private let themeService = ThemeService(managedObjectContext: ContextManager.sharedInstance().mainContext)
-    private var syncHelper: WPContentSyncHelper!
-    private var syncingPage = 0
-    private let syncPadding = 5
+    fileprivate let themeService = ThemeService(managedObjectContext: ContextManager.sharedInstance().mainContext)
+    fileprivate var themesSyncHelper: WPContentSyncHelper!
+    fileprivate var themesSyncingPage = 0
+    fileprivate var customThemesSyncHelper: WPContentSyncHelper!
+    fileprivate let syncPadding = 5
 
     // MARK: - Private Aliases
 
-    private typealias Styles = WPStyleGuide.Themes
+    fileprivate typealias Styles = WPStyleGuide.Themes
 
      /**
      *  @brief      Convenience method for browser instantiation
@@ -205,7 +252,7 @@ public protocol ThemePresenter: class
      *
      *  @returns    ThemeBrowserViewController instance
      */
-    public class func browserWithBlog(blog: Blog) -> ThemeBrowserViewController {
+    open class func browserWithBlog(_ blog: Blog) -> ThemeBrowserViewController {
         let storyboard = UIStoryboard(name: "ThemeBrowser", bundle: nil)
         let viewController = storyboard.instantiateInitialViewController() as! ThemeBrowserViewController
         viewController.blog = blog
@@ -215,23 +262,28 @@ public protocol ThemePresenter: class
 
     // MARK: - UIViewController
 
-    public override func viewDidLoad() {
+    open override func viewDidLoad() {
         super.viewDidLoad()
 
         title = NSLocalizedString("Themes", comment: "Title of Themes browser page")
 
-        WPStyleGuide.configureColorsForView(view, collectionView:collectionView)
+        WPStyleGuide.configureColors(for: view, collectionView: collectionView)
 
         fetchThemes()
-        sections = themesCount == 0 ? [.Search, .Themes] : [.Search, .Info, .Themes]
+        sections = (themeCount == 0 && customThemeCount == 0) ? [.search, .customThemes, .themes] :
+                                                                [.search, .info, .customThemes, .themes]
 
         configureSearchController()
 
         updateActiveTheme()
-        setupSyncHelper()
+        setupThemesSyncHelper()
+        if blog.supports(BlogFeature.customThemes) {
+            setupCustomThemesSyncHelper()
+        }
+        syncContent()
     }
 
-    private func configureSearchController() {
+    fileprivate func configureSearchController() {
         extendedLayoutIncludesOpaqueBars = true
         definesPresentationContext = true
 
@@ -241,24 +293,32 @@ public protocol ThemePresenter: class
         searchController.delegate = self
         searchController.searchResultsUpdater = self
 
-        collectionView.registerClass(ThemeBrowserSearchHeaderView.self,
+        collectionView.register(ThemeBrowserSearchHeaderView.self,
                                      forSupplementaryViewOfKind: UICollectionElementKindSectionHeader,
                                      withReuseIdentifier: ThemeBrowserSearchHeaderView.reuseIdentifier)
+
+        collectionView.register(UINib(nibName: "ThemeBrowserSectionHeaderView", bundle: Bundle(for: ThemeBrowserSectionHeaderView.self)),
+                                    forSupplementaryViewOfKind: UICollectionElementKindSectionHeader,
+                                    withReuseIdentifier: ThemeBrowserViewController.reuseIdentifierForThemesHeader)
+
+        collectionView.register(UINib(nibName: "ThemeBrowserSectionHeaderView", bundle: Bundle(for: ThemeBrowserSectionHeaderView.self)),
+                                forSupplementaryViewOfKind: UICollectionElementKindSectionHeader,
+                                withReuseIdentifier: ThemeBrowserViewController.reuseIdentifierForCustomThemesHeader)
 
         WPStyleGuide.configureSearchBar(searchController.searchBar)
     }
 
-    private var searchBarHeight: CGFloat {
-        return CGRectGetHeight(searchController.searchBar.bounds) + topLayoutGuide.length
+    fileprivate var searchBarHeight: CGFloat {
+        return searchController.searchBar.bounds.height + topLayoutGuide.length
     }
 
-    public override func traitCollectionDidChange(previousTraitCollection: UITraitCollection?) {
+    open override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
 
         collectionView?.collectionViewLayout.invalidateLayout()
     }
 
-    public override func viewWillAppear(animated: Bool) {
+    open override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
 
         registerForKeyboardNotifications()
@@ -278,10 +338,10 @@ public protocol ThemePresenter: class
         }
     }
 
-    public override func viewWillDisappear(animated: Bool) {
+    open override func viewWillDisappear(_ animated: Bool) {
 
-        if searchController.active {
-            searchController.active = false
+        if searchController.isActive {
+            searchController.isActive = false
         }
 
         super.viewWillDisappear(animated)
@@ -289,30 +349,30 @@ public protocol ThemePresenter: class
         unregisterForKeyboardNotifications()
     }
 
-    public override func preferredStatusBarStyle() -> UIStatusBarStyle {
-        return .LightContent
+    open override var preferredStatusBarStyle: UIStatusBarStyle {
+        return .lightContent
     }
 
-    private func registerForKeyboardNotifications() {
-        NSNotificationCenter.defaultCenter().addObserver(self, selector: #selector(ThemeBrowserViewController.keyboardDidShow(_:)), name: UIKeyboardDidShowNotification, object: nil)
-        NSNotificationCenter.defaultCenter().addObserver(self, selector: #selector(ThemeBrowserViewController.keyboardWillHide(_:)), name: UIKeyboardWillHideNotification, object: nil)
+    fileprivate func registerForKeyboardNotifications() {
+        NotificationCenter.default.addObserver(self, selector: #selector(ThemeBrowserViewController.keyboardDidShow(_:)), name: NSNotification.Name.UIKeyboardDidShow, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(ThemeBrowserViewController.keyboardWillHide(_:)), name: NSNotification.Name.UIKeyboardWillHide, object: nil)
     }
 
-    private func unregisterForKeyboardNotifications() {
-        NSNotificationCenter.defaultCenter().removeObserver(self, name: UIKeyboardDidShowNotification, object: nil)
-        NSNotificationCenter.defaultCenter().removeObserver(self, name: UIKeyboardWillHideNotification, object: nil)
+    fileprivate func unregisterForKeyboardNotifications() {
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name.UIKeyboardDidShow, object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name.UIKeyboardWillHide, object: nil)
     }
 
-    public func keyboardDidShow(notification: NSNotification) {
+    open func keyboardDidShow(_ notification: Foundation.Notification) {
         let keyboardFrame = localKeyboardFrameFromNotification(notification)
-        let keyboardHeight = CGRectGetMaxY(collectionView.frame) - keyboardFrame.origin.y
+        let keyboardHeight = collectionView.frame.maxY - keyboardFrame.origin.y
 
         collectionView.contentInset.bottom = keyboardHeight
         collectionView.scrollIndicatorInsets.top = searchBarHeight
         collectionView.scrollIndicatorInsets.bottom = keyboardHeight
     }
 
-    public func keyboardWillHide(notification: NSNotification) {
+    open func keyboardWillHide(_ notification: Foundation.Notification) {
         let tabBarHeight = tabBarController?.tabBar.bounds.height ?? 0
 
         collectionView.contentInset.top = topLayoutGuide.length
@@ -321,69 +381,97 @@ public protocol ThemePresenter: class
         collectionView.scrollIndicatorInsets.bottom = tabBarHeight
     }
 
-    private func localKeyboardFrameFromNotification(notification: NSNotification) -> CGRect {
-        guard let keyboardFrame = (notification.userInfo?[UIKeyboardFrameEndUserInfoKey] as? NSValue)?.CGRectValue() else {
+    fileprivate func localKeyboardFrameFromNotification(_ notification: Foundation.Notification) -> CGRect {
+        guard let keyboardFrame = (notification.userInfo?[UIKeyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else {
                 return .zero
         }
 
         // Convert the frame from window coordinates
-        return view.convertRect(keyboardFrame, fromView: nil)
+        return view.convert(keyboardFrame, from: nil)
     }
 
     // MARK: - Syncing the list of themes
 
-    private func updateActiveTheme() {
+    fileprivate func updateActiveTheme() {
         let lastActiveThemeId = blog.currentThemeId
 
-        themeService.getActiveThemeForBlog(blog,
+        _ = themeService.getActiveTheme(for: blog,
             success: { [weak self] (theme: Theme?) in
                 if lastActiveThemeId != theme?.themeId {
                     self?.collectionView?.collectionViewLayout.invalidateLayout()
                 }
             },
-            failure: { (error : NSError!) in
-                DDLogSwift.logError("Error updating active theme: \(error.localizedDescription)")
+            failure: { (error) in
+                DDLogError("Error updating active theme: \(String(describing: error?.localizedDescription))")
         })
     }
 
-    private func setupSyncHelper() {
-        syncHelper = WPContentSyncHelper()
-        syncHelper.delegate = self
+    fileprivate func setupThemesSyncHelper() {
+        themesSyncHelper = WPContentSyncHelper()
+        themesSyncHelper.delegate = self
+    }
 
-        if syncHelper.syncContent() {
+    fileprivate func setupCustomThemesSyncHelper() {
+        customThemesSyncHelper = WPContentSyncHelper()
+        customThemesSyncHelper.delegate = self
+    }
+
+    fileprivate func syncContent() {
+        if themesSyncHelper.syncContent() &&
+            (!blog.supports(BlogFeature.customThemes) ||
+                customThemesSyncHelper.syncContent()) {
             updateResults()
         }
     }
 
-    private func syncMoreIfNeeded(themeIndex: NSInteger) {
-        let paddedCount = themeIndex + syncPadding
-        if paddedCount >= themesCount && syncHelper.hasMoreContent && syncHelper.syncMoreContent() {
+    fileprivate func syncMoreThemesIfNeeded(_ indexPath: IndexPath) {
+        let paddedCount = indexPath.row + syncPadding
+        if paddedCount >= themeCount && themesSyncHelper.hasMoreContent && themesSyncHelper.syncMoreContent() {
             updateResults()
         }
     }
 
-    private func syncThemePage(page: NSInteger, success: ((hasMore: Bool) -> Void)?, failure: ((error: NSError) -> Void)?) {
+    fileprivate func syncThemePage(_ page: NSInteger, success: ((_ hasMore: Bool) -> Void)?, failure: ((_ error: NSError) -> Void)?) {
         assert(page > 0)
-
-        syncingPage = page
-        themeService.getThemesForBlog(blog,
-            page: syncingPage,
+        themesSyncingPage = page
+        _ = themeService.getThemesFor(blog,
+            page: themesSyncingPage,
             sync: page == 1,
-            success: {(themes: [Theme]?, hasMore: Bool) in
+            success: {[weak self](themes: [Theme]?, hasMore: Bool, themeCount: NSInteger) in
                 if let success = success {
-                    success(hasMore: hasMore)
+                    success(hasMore)
                 }
+                self?.totalThemeCount = themeCount
             },
-            failure: { (error : NSError!) in
-                DDLogSwift.logError("Error syncing themes: \(error.localizedDescription)")
-                if let failure = failure {
-                    failure(error: error)
+            failure: { (error) in
+                DDLogError("Error syncing themes: \(String(describing: error?.localizedDescription))")
+                if let failure = failure,
+                    let error = error {
+                    failure(error as NSError)
                 }
             })
     }
 
-    public func currentTheme() -> Theme? {
-        guard let themeId = blog.currentThemeId where !themeId.isEmpty else {
+    fileprivate func syncCustomThemes(success: ((_ hasMore: Bool) -> Void)?, failure: ((_ error: NSError) -> Void)?) {
+        _ = themeService.getCustomThemes(for: blog,
+            sync: true,
+            success: {[weak self](themes: [Theme]?, hasMore: Bool, themeCount: NSInteger) in
+                if let success = success {
+                    success(hasMore)
+                }
+                self?.totalCustomThemeCount = themeCount
+            },
+            failure: { (error) in
+                DDLogError("Error syncing themes: \(String(describing: error?.localizedDescription))")
+                if let failure = failure,
+                    let error = error {
+                    failure(error as NSError)
+                }
+            })
+    }
+
+    open func currentTheme() -> Theme? {
+        guard let themeId = blog.currentThemeId, !themeId.isEmpty else {
             return nil
         }
 
@@ -396,171 +484,204 @@ public protocol ThemePresenter: class
         return nil
     }
 
-    private func updateResults() {
-        if themesCount == 0 {
+    fileprivate func updateResults() {
+        if themeCount == 0 && customThemeCount == 0 {
             showNoResults()
         } else {
             hideNoResults()
         }
     }
 
-    private func showNoResults() {
+    fileprivate func showNoResults() {
         guard !noResultsShown else {
             return
         }
 
         let title: String
-        if searchController.active {
-            title = NSLocalizedString("No Themes Found", comment:"Text displayed when theme name search has no matches")
+        if searchController.isActive {
+            title = NSLocalizedString("No Themes Found", comment: "Text displayed when theme name search has no matches")
         } else {
-            title = NSLocalizedString("Fetching Themes...", comment:"Text displayed while fetching themes")
+            title = NSLocalizedString("Fetching Themes...", comment: "Text displayed while fetching themes")
         }
         noResultsView.titleText = title
         view.addSubview(noResultsView)
-        syncMoreIfNeeded(0)
+        syncMoreThemesIfNeeded(IndexPath(item: 0, section: 0))
     }
 
-    private func hideNoResults() {
+    fileprivate func hideNoResults() {
         guard noResultsShown else {
             return
         }
 
         noResultsView.removeFromSuperview()
 
-        if searchController.active {
+        if searchController.isActive {
             collectionView?.reloadData()
         } else {
-            sections = [.Search, .Info, .Themes]
+            sections = [.search, .info, .customThemes, .themes]
             collectionView?.collectionViewLayout.invalidateLayout()
         }
     }
 
     // MARK: - WPContentSyncHelperDelegate
 
-    func syncHelper(syncHelper:WPContentSyncHelper, syncContentWithUserInteraction userInteraction: Bool, success: ((hasMore: Bool) -> Void)?, failure: ((error: NSError) -> Void)?) {
-        syncThemePage(1, success: success, failure: failure)
+    func syncHelper(_ syncHelper: WPContentSyncHelper, syncContentWithUserInteraction userInteraction: Bool, success: ((_ hasMore: Bool) -> Void)?, failure: ((_ error: NSError) -> Void)?) {
+        if (syncHelper == themesSyncHelper) {
+            syncThemePage(1, success: success, failure: failure)
+        } else if (syncHelper == customThemesSyncHelper) {
+            syncCustomThemes(success: success, failure: failure)
+        }
     }
 
-    func syncHelper(syncHelper:WPContentSyncHelper, syncMoreWithSuccess success: ((hasMore: Bool) -> Void)?, failure: ((error: NSError) -> Void)?) {
-        let nextPage = syncingPage + 1
-        syncThemePage(nextPage, success: success, failure: failure)
+    func syncHelper(_ syncHelper: WPContentSyncHelper, syncMoreWithSuccess success: ((_ hasMore: Bool) -> Void)?, failure: ((_ error: NSError) -> Void)?) {
+        if syncHelper == themesSyncHelper {
+            let nextPage = themesSyncingPage + 1
+            syncThemePage(nextPage, success: success, failure: failure)
+        }
     }
 
-    func syncContentEnded() {
+    func syncContentEnded(_ syncHelper: WPContentSyncHelper) {
         updateResults()
-        let lastVisibleTheme = collectionView?.indexPathsForVisibleItems().last?.row ?? 0
-        syncMoreIfNeeded(lastVisibleTheme)
+        let lastVisibleTheme = collectionView?.indexPathsForVisibleItems.last ?? IndexPath(item: 0, section: 0)
+        if syncHelper == themesSyncHelper {
+            syncMoreThemesIfNeeded(lastVisibleTheme)
+        }
     }
 
-    func hasNoMoreContent() {
-        syncingPage = 0
+    func hasNoMoreContent(_ syncHelper: WPContentSyncHelper) {
+        if syncHelper == themesSyncHelper {
+            themesSyncingPage = 0
+        }
         collectionView?.collectionViewLayout.invalidateLayout()
     }
 
     // MARK: - UICollectionViewDataSource
 
-    public func collectionView(collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+    open func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         switch sections[section] {
-        case .Search, .Info:
+        case .search, .info:
             return 0
-        case .Themes:
-            return themesCount
+        case .customThemes:
+            return customThemeCount
+        case .themes:
+            return themeCount
         }
     }
 
-    public func collectionView(collectionView: UICollectionView, cellForItemAtIndexPath indexPath: NSIndexPath) -> UICollectionViewCell {
+    open func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
 
-        let cell = collectionView.dequeueReusableCellWithReuseIdentifier(ThemeBrowserCell.reuseIdentifier, forIndexPath: indexPath) as! ThemeBrowserCell
+        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: ThemeBrowserCell.reuseIdentifier, for: indexPath) as! ThemeBrowserCell
 
         cell.presenter = self
-        cell.theme = themeAtIndex(indexPath.row)
+        cell.theme = themeAtIndexPath(indexPath)
 
-        syncMoreIfNeeded(indexPath.row)
+        if sections[indexPath.section] == .themes {
+            syncMoreThemesIfNeeded(indexPath)
+        }
 
         return cell
     }
 
-    public func collectionView(collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, atIndexPath indexPath: NSIndexPath) -> UICollectionReusableView {
+    open func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
         switch kind {
         case UICollectionElementKindSectionHeader:
-            if sections[indexPath.section] == .Search {
-                let searchHeader = collectionView.dequeueReusableSupplementaryViewOfKind(kind, withReuseIdentifier: ThemeBrowserSearchHeaderView.reuseIdentifier, forIndexPath: indexPath) as! ThemeBrowserSearchHeaderView
+            if sections[indexPath.section] == .search {
+                let searchHeader = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: ThemeBrowserSearchHeaderView.reuseIdentifier, for: indexPath) as! ThemeBrowserSearchHeaderView
 
                 searchHeader.searchBar = searchController.searchBar
 
                 return searchHeader
-            } else {
-                let header = collectionView.dequeueReusableSupplementaryViewOfKind(kind, withReuseIdentifier: ThemeBrowserHeaderView.reuseIdentifier, forIndexPath: indexPath) as! ThemeBrowserHeaderView
+            } else if sections[indexPath.section] == .info {
+                let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: ThemeBrowserHeaderView.reuseIdentifier, for: indexPath) as! ThemeBrowserHeaderView
                 header.presenter = self
                 return header
+            } else {
+                // We don't want the collectionView to reuse the section headers
+                // since we need to keep a reference to them to update the counts
+                if sections[indexPath.section] == .customThemes {
+                    customThemesHeader = (collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: ThemeBrowserViewController.reuseIdentifierForCustomThemesHeader, for: indexPath) as! ThemeBrowserSectionHeaderView)
+                    return customThemesHeader!
+                } else {
+                    themesHeader = (collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: ThemeBrowserViewController.reuseIdentifierForCustomThemesHeader, for: indexPath) as! ThemeBrowserSectionHeaderView)
+                    return themesHeader!
+                }
             }
         case UICollectionElementKindSectionFooter:
-            let footer = collectionView.dequeueReusableSupplementaryViewOfKind(kind, withReuseIdentifier: "ThemeBrowserFooterView", forIndexPath: indexPath)
+            let footer = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "ThemeBrowserFooterView", for: indexPath)
             return footer
         default:
             fatalError("Unexpected theme browser element")
         }
     }
 
-    public func numberOfSectionsInCollectionView(collectionView: UICollectionView) -> Int {
+    open func numberOfSections(in collectionView: UICollectionView) -> Int {
         return sections.count
     }
 
     // MARK: - UICollectionViewDelegate
 
-    public func collectionView(collectionView: UICollectionView, didSelectItemAtIndexPath indexPath: NSIndexPath) {
-        if let theme = themeAtIndex(indexPath.row) {
+    open func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        if let theme = themeAtIndexPath(indexPath) {
             if theme.isCurrentTheme() {
                 presentCustomizeForTheme(theme)
             } else {
-                presentViewForTheme(theme)
+                theme.custom ? presentDetailsForTheme(theme) : presentViewForTheme(theme)
             }
         }
     }
 
     // MARK: - UICollectionViewDelegateFlowLayout
 
-    public func collectionView(collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout,  referenceSizeForHeaderInSection section:NSInteger) -> CGSize {
+    open func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout,  referenceSizeForHeaderInSection section: NSInteger) -> CGSize {
         switch sections[section] {
-        case .Themes:
+        case .themes, .customThemes:
+            if !hideSectionHeaders
+                && blog.supports(BlogFeature.customThemes) {
+                return CGSize(width: 0, height: ThemeBrowserSectionHeaderView.height)
+            }
             return .zero
-        case .Search:
-                return CGSize(width: 0, height: searchController.searchBar.bounds.height)
-        case .Info:
-            let horizontallyCompact = traitCollection.horizontalSizeClass == .Compact
+        case .search:
+            return CGSize(width: 0, height: searchController.searchBar.bounds.height)
+        case .info:
+            let horizontallyCompact = traitCollection.horizontalSizeClass == .compact
             let height = Styles.headerHeight(horizontallyCompact, includingSearchBar: ThemeType.mayPurchase)
 
             return CGSize(width: 0, height: height)
         }
     }
 
-    public func collectionView(collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAtIndexPath indexPath: NSIndexPath) -> CGSize {
+    open func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
         let parentViewWidth = collectionView.frame.size.width
 
         return Styles.cellSizeForFrameWidth(parentViewWidth)
     }
 
-    public func collectionView(collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, referenceSizeForFooterInSection section: Int) -> CGSize {
-            guard sections[section] == .Themes && syncHelper.isLoadingMore else {
+    open func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, referenceSizeForFooterInSection section: Int) -> CGSize {
+            guard sections[section] == .themes && themesSyncHelper.isLoadingMore else {
                 return CGSize.zero
             }
 
             return CGSize(width: 0, height: Styles.footerHeight)
     }
 
-    public func collectionView(collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, insetForSectionAtIndex section: Int) -> UIEdgeInsets {
+    open func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, insetForSectionAt section: Int) -> UIEdgeInsets {
         switch sections[section] {
-        case .Themes:
+        case .customThemes:
+            if !blog.supports(BlogFeature.customThemes) {
+                return .zero
+            }
             return Styles.themeMargins
-        case .Info, .Search:
+        case .themes:
+            return Styles.themeMargins
+        case .info, .search:
             return Styles.infoMargins
         }
     }
 
     // MARK: - Search support
 
-    private func beginSearchFor(pattern: String) {
-        searchController.active = true
+    fileprivate func beginSearchFor(_ pattern: String) {
+        searchController.isActive = true
         searchController.searchBar.text = pattern
 
         searchName = pattern
@@ -568,39 +689,40 @@ public protocol ThemePresenter: class
 
     // MARK: - UISearchControllerDelegate
 
-    public func willPresentSearchController(searchController: UISearchController) {
-        if sections[1] == .Info {
+    open func willPresentSearchController(_ searchController: UISearchController) {
+        hideSectionHeaders = true
+        if sections[1] == .info {
             collectionView?.collectionViewLayout.invalidateLayout()
             setInfoSectionHidden(true)
         }
     }
 
-    public func didPresentSearchController(searchController: UISearchController) {
-        WPAppAnalytics.track(.ThemesAccessedSearch, withBlog: blog)
+    open func didPresentSearchController(_ searchController: UISearchController) {
+        WPAppAnalytics.track(.themesAccessedSearch, with: blog)
     }
 
-    public func willDismissSearchController(searchController: UISearchController) {
+    open func willDismissSearchController(_ searchController: UISearchController) {
+        hideSectionHeaders = false
         searchName = ""
         searchController.searchBar.text = ""
     }
 
-    public func didDismissSearchController(searchController: UISearchController) {
-        if sections[1] == .Themes {
+    open func didDismissSearchController(_ searchController: UISearchController) {
+        if sections[1] == .themes || sections[1] == .customThemes {
             setInfoSectionHidden(false)
         }
-
         collectionView.scrollIndicatorInsets.top = topLayoutGuide.length
     }
 
-    private func setInfoSectionHidden(hidden: Bool) {
+    fileprivate func setInfoSectionHidden(_ hidden: Bool) {
         let hide = {
-            self.collectionView?.deleteSections(NSIndexSet(index: 1))
-            self.sections = [.Search, .Themes]
+            self.collectionView?.deleteSections(IndexSet(integer: 1))
+            self.sections = [.search, .customThemes, .themes]
         }
 
         let show = {
-            self.collectionView?.insertSections(NSIndexSet(index: 1))
-            self.sections = [.Search, .Info, .Themes]
+            self.collectionView?.insertSections(IndexSet(integer: 1))
+            self.sections = [.search, .info, .customThemes, .themes]
         }
 
         collectionView.performBatchUpdates({
@@ -610,13 +732,13 @@ public protocol ThemePresenter: class
 
     // MARK: - UISearchResultsUpdating
 
-    public func updateSearchResultsForSearchController(searchController: UISearchController) {
+    open func updateSearchResults(for searchController: UISearchController) {
         searchName = searchController.searchBar.text ?? ""
     }
 
     // MARK: - NSFetchedResultsController helpers
 
-    private func searchNamePredicate() -> NSPredicate? {
+    fileprivate func searchNamePredicate() -> NSPredicate? {
         guard !searchName.isEmpty else {
             return nil
         }
@@ -624,8 +746,16 @@ public protocol ThemePresenter: class
         return NSPredicate(format: "name contains[c] %@", searchName)
     }
 
-    private func browsePredicate() -> NSPredicate? {
-        let blogPredicate = NSPredicate(format: "blog == %@", self.blog)
+    fileprivate func browsePredicate() -> NSPredicate? {
+        return browsePredicateThemesWithCustomValue(false)
+    }
+
+    fileprivate func customThemesBrowsePredicate() -> NSPredicate? {
+        return browsePredicateThemesWithCustomValue(true)
+    }
+
+    fileprivate func browsePredicateThemesWithCustomValue(_ custom: Bool) -> NSPredicate? {
+        let blogPredicate = NSPredicate(format: "blog == %@ AND custom == %d", self.blog, custom ? 1 : 0)
 
         let subpredicates = [blogPredicate, searchNamePredicate(), filterType.predicate].flatMap { $0 }
         switch subpredicates.count {
@@ -636,92 +766,108 @@ public protocol ThemePresenter: class
         }
     }
 
-    private func fetchThemes() {
+    fileprivate func fetchThemes() {
         do {
             themesController.fetchRequest.predicate = browsePredicate()
             try themesController.performFetch()
+            if self.blog.supports(BlogFeature.customThemes) {
+                customThemesController.fetchRequest.predicate = customThemesBrowsePredicate()
+                try customThemesController.performFetch()
+            }
         } catch {
-            DDLogSwift.logError("Error fetching themes: \(error)")
+            DDLogError("Error fetching themes: \(error)")
         }
     }
 
     // MARK: - NSFetchedResultsControllerDelegate
 
-    public func controllerDidChangeContent(controller: NSFetchedResultsController) {
+    open func controllerDidChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
         reloadThemes()
     }
 
     // MARK: - ThemePresenter
 
-    public func activateTheme(theme: Theme?) {
-        guard let theme = theme where !theme.isCurrentTheme() else {
+    open func activateTheme(_ theme: Theme?) {
+        guard let theme = theme, !theme.isCurrentTheme() else {
             return
         }
 
-        searchController.active = false
-        themeService.activateTheme(theme,
-            forBlog: blog,
+        _ = themeService.activate(theme,
+            for: blog,
             success: { [weak self] (theme: Theme?) in
-                WPAppAnalytics.track(.ThemesChangedTheme, withProperties: ["themeId": theme?.themeId ?? ""], withBlog: self?.blog)
+                WPAppAnalytics.track(.themesChangedTheme, withProperties: ["themeId": theme?.themeId ?? ""], with: self?.blog)
 
                 self?.collectionView?.reloadData()
 
-                let successTitle = NSLocalizedString("Theme Activated", comment:"Title of alert when theme activation succeeds")
-                let successFormat = NSLocalizedString("Thanks for choosing %@ by %@", comment:"Message of alert when theme activation succeeds")
-                let successMessage = String(format:successFormat, theme?.name ?? "", theme?.author ?? "")
-                let manageTitle = NSLocalizedString("Manage site", comment:"Return to blog screen action when theme activation succeeds")
-                let okTitle = NSLocalizedString("OK", comment:"Alert dismissal title")
+                let successTitle = NSLocalizedString("Theme Activated", comment: "Title of alert when theme activation succeeds")
+                let successFormat = NSLocalizedString("Thanks for choosing %@ by %@", comment: "Message of alert when theme activation succeeds")
+                let successMessage = String(format: successFormat, theme?.name ?? "", theme?.author ?? "")
+                let manageTitle = NSLocalizedString("Manage site", comment: "Return to blog screen action when theme activation succeeds")
+                let okTitle = NSLocalizedString("OK", comment: "Alert dismissal title")
                 let alertController = UIAlertController(title: successTitle,
                     message: successMessage,
-                    preferredStyle: .Alert)
+                    preferredStyle: .alert)
                 alertController.addActionWithTitle(manageTitle,
-                    style: .Default,
+                    style: .default,
                     handler: { [weak self] (action: UIAlertAction) in
-                        self?.navigationController?.popViewControllerAnimated(true)
+                        _ = self?.navigationController?.popViewController(animated: true)
                     })
                 alertController.addDefaultActionWithTitle(okTitle, handler: nil)
                 alertController.presentFromRootViewController()
             },
-            failure: { (error : NSError!) in
-                DDLogSwift.logError("Error activating theme \(theme.themeId): \(error.localizedDescription)")
+            failure: { (error) in
+                DDLogError("Error activating theme \(theme.themeId): \(String(describing: error?.localizedDescription))")
 
-                let errorTitle = NSLocalizedString("Activation Error", comment:"Title of alert when theme activation fails")
-                let okTitle = NSLocalizedString("OK", comment:"Alert dismissal title")
+                let errorTitle = NSLocalizedString("Activation Error", comment: "Title of alert when theme activation fails")
+                let okTitle = NSLocalizedString("OK", comment: "Alert dismissal title")
                 let alertController = UIAlertController(title: errorTitle,
-                    message: error.localizedDescription,
-                    preferredStyle: .Alert)
+                    message: error?.localizedDescription,
+                    preferredStyle: .alert)
                 alertController.addDefaultActionWithTitle(okTitle, handler: nil)
                 alertController.presentFromRootViewController()
         })
     }
 
-    public func presentCustomizeForTheme(theme: Theme?) {
-        WPAppAnalytics.track(.ThemesCustomizeAccessed, withBlog: self.blog)
+    open func installThemeAndPresentCustomizer(_ theme: Theme) {
+        _ = themeService.installTheme(theme,
+            for: blog,
+            success: { [weak self] in
+                self?.presentUrlForTheme(theme, url: theme.customizeUrl(), activeButton: false)
+            }, failure: nil)
+    }
+
+    open func presentCustomizeForTheme(_ theme: Theme?) {
+        WPAppAnalytics.track(.themesCustomizeAccessed, with: self.blog)
         presentUrlForTheme(theme, url: theme?.customizeUrl(), activeButton: false)
     }
 
-    public func presentPreviewForTheme(theme: Theme?) {
-        WPAppAnalytics.track(.ThemesPreviewedSite, withBlog: self.blog)
-        presentUrlForTheme(theme, url: theme?.customizeUrl(), activeButton: false)
+    open func presentPreviewForTheme(_ theme: Theme?) {
+        WPAppAnalytics.track(.themesPreviewedSite, with: self.blog)
+        // In order to Try & Customize a theme we first need to install it (Jetpack sites)
+        if let theme = theme, self.blog.supports(.customThemes) && !theme.custom {
+            installThemeAndPresentCustomizer(theme)
+        } else {
+            presentUrlForTheme(theme, url: theme?.customizeUrl(), activeButton: false)
+        }
     }
 
-    public func presentDetailsForTheme(theme: Theme?) {
-        WPAppAnalytics.track(.ThemesDetailsAccessed, withBlog: self.blog)
+    open func presentDetailsForTheme(_ theme: Theme?) {
+        WPAppAnalytics.track(.themesDetailsAccessed, with: self.blog)
         presentUrlForTheme(theme, url: theme?.detailsUrl())
     }
 
-    public func presentSupportForTheme(theme: Theme?) {
-        WPAppAnalytics.track(.ThemesSupportAccessed, withBlog: self.blog)
+    open func presentSupportForTheme(_ theme: Theme?) {
+        WPAppAnalytics.track(.themesSupportAccessed, with: self.blog)
         presentUrlForTheme(theme, url: theme?.supportUrl())
     }
 
-    public func presentViewForTheme(theme: Theme?) {
-        WPAppAnalytics.track(.ThemesDemoAccessed, withBlog: self.blog)
+    open func presentViewForTheme(_ theme: Theme?) {
+        WPAppAnalytics.track(.themesDemoAccessed, with: self.blog)
         presentUrlForTheme(theme, url: theme?.viewUrl())
     }
 
-    public func presentUrlForTheme(theme: Theme?, url: String?, activeButton: Bool = true) {
-        guard let theme = theme, url = url where !url.isEmpty else {
+    open func presentUrlForTheme(_ theme: Theme?, url: String?, activeButton: Bool = true) {
+        guard let theme = theme, let url = url, !url.isEmpty else {
             return
         }
 
@@ -734,13 +880,13 @@ public protocol ThemePresenter: class
         webViewController.title = theme.name
         var buttons: [UIBarButtonItem]?
         if activeButton && !theme.isCurrentTheme() {
-           let activate = UIBarButtonItem(title: ThemeAction.Activate.title, style: .Plain, target: self, action: #selector(ThemeBrowserViewController.activatePresentingTheme))
+           let activate = UIBarButtonItem(title: ThemeAction.activate.title, style: .plain, target: self, action: #selector(ThemeBrowserViewController.activatePresentingTheme))
             buttons = [activate]
         }
         webViewController.navigationItem.rightBarButtonItems = buttons
 
-        if searchController != nil && searchController.active {
-            searchController.dismissViewControllerAnimated(true, completion: {
+        if searchController != nil && searchController.isActive {
+            searchController.dismiss(animated: true, completion: {
                 self.navigationController?.pushViewController(webViewController, animated: true)
             })
         } else {
@@ -748,9 +894,9 @@ public protocol ThemePresenter: class
         }
     }
 
-    public func activatePresentingTheme() {
+    open func activatePresentingTheme() {
         suspendedSearch = ""
-        navigationController?.popViewControllerAnimated(true)
+        _ = navigationController?.popViewController(animated: true)
         activateTheme(presentingTheme)
         presentingTheme = nil
     }

@@ -1,0 +1,2 @@
+Jetpack sites: Added support for custom roles.
+Several minor improvements and bug fixes.

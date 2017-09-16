@@ -1,0 +1,2 @@
+Webbplatser med Jetpack: Stöd för anpassade roller tillagt.
+Ett flertal mindre förbättringar och felrättningar.

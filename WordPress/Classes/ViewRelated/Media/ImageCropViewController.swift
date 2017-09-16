@@ -5,11 +5,12 @@ import UIKit
 
 /// This ViewController allows the user to resize and crop any given UIImage.
 ///
-class ImageCropViewController : UIViewController, UIScrollViewDelegate
-{
+class ImageCropViewController: UIViewController, UIScrollViewDelegate {
     // MARK: - Public Properties
-    var onCompletion: (UIImage -> Void)?
-
+    /// Will be invoked with the cropped and scaled image and a boolean indicating
+    /// whether or not the original image was modified
+    var onCompletion: ((UIImage, Bool) -> Void)?
+    var maskShape: ImageCropOverlayMaskShape = .circle
 
     // MARK: - Public Initializers
 
@@ -29,9 +30,9 @@ class ImageCropViewController : UIViewController, UIScrollViewDelegate
         title = NSLocalizedString("Resize & Crop", comment: "")
 
         // Setup: NavigationItem
-        let useButtonTitle = NSLocalizedString("Use", comment: "Use the current image as Gravatar")
+        let useButtonTitle = NSLocalizedString("Use", comment: "Use the current image")
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: useButtonTitle,
-                                                            style: .Plain,
+                                                            style: .plain,
                                                             target: self,
                                                             action: #selector(btnCropWasPressed))
 
@@ -45,17 +46,18 @@ class ImageCropViewController : UIViewController, UIScrollViewDelegate
         scrollView.zoomScale = minimumScale
 
         // Setup: Overlay
-        overlayView.borderColor = WPStyleGuide.newKidOnTheBlockBlue()
+        overlayView.borderColor = WPStyleGuide.mediumBlue()
+        overlayView.maskShape = maskShape
     }
 
 
     // MARK: - UIScrollViewDelegate Methods
 
-    func viewForZoomingInScrollView(scrollView: UIScrollView) -> UIView? {
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
         return imageView
     }
 
-    func scrollViewDidEndZooming(scrollView: UIScrollView, withView view: UIView?, atScale scale: CGFloat) {
+    func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
         // NO-OP:
         // Required to enable scrollView Zooming
     }
@@ -64,7 +66,7 @@ class ImageCropViewController : UIViewController, UIScrollViewDelegate
     // MARK: - Action Handlers
     @IBAction func btnCropWasPressed() {
         // Calculations!
-        let screenScale     = UIScreen.mainScreen().scale
+        let screenScale     = UIScreen.main.scale
         let zoomScale       = scrollView.zoomScale
         let oldSize         = rawImage.size
         let resizeRect      = CGRect(x: 0, y: 0, width: oldSize.width * zoomScale, height: oldSize.height * zoomScale)
@@ -73,30 +75,38 @@ class ImageCropViewController : UIViewController, UIScrollViewDelegate
                                      width: scrollView.frame.width * screenScale,
                                      height: scrollView.frame.height * screenScale)
 
+        if scrollView.contentOffset.x == 0 &&
+            scrollView.contentOffset.y == 0 &&
+            oldSize.width == clippingRect.width &&
+            oldSize.height == clippingRect.height {
+            onCompletion?(rawImage, false)
+            return
+        }
+
         // Resize
         UIGraphicsBeginImageContextWithOptions(resizeRect.size, false, screenScale)
-        rawImage?.drawInRect(resizeRect)
+        rawImage?.draw(in: resizeRect)
         let scaledImage = UIGraphicsGetImageFromCurrentImageContext()
         UIGraphicsEndImageContext()
 
         // Crop
-        guard let clippedImageRef = CGImageCreateWithImageInRect(scaledImage!.CGImage!, clippingRect.integral) else {
+        guard let clippedImageRef = scaledImage!.cgImage!.cropping(to: clippingRect.integral) else {
             return
         }
 
-        let clippedImage = UIImage(CGImage: clippedImageRef, scale: screenScale, orientation: .Up)
-        onCompletion?(clippedImage)
+        let clippedImage = UIImage(cgImage: clippedImageRef, scale: screenScale, orientation: .up)
+        onCompletion?(clippedImage, true)
     }
 
 
     // MARK: - Private Constants
-    private let maximumScaleFactor  = CGFloat(3)
+    fileprivate let maximumScaleFactor  = CGFloat(3)
 
     // MARK: - Private Properties
-    private var rawImage                : UIImage!
+    fileprivate var rawImage: UIImage!
 
     // MARK: - IBOutlets
-    @IBOutlet private var scrollView    : UIScrollView!
-    @IBOutlet private var imageView     : UIImageView!
-    @IBOutlet private var overlayView   : GravatarOverlayView!
+    @IBOutlet fileprivate var scrollView: UIScrollView!
+    @IBOutlet fileprivate var imageView: UIImageView!
+    @IBOutlet fileprivate var overlayView: ImageCropOverlayView!
 }

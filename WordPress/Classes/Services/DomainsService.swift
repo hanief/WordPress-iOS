@@ -1,16 +1,18 @@
 import Foundation
+import CocoaLumberjack
+import WordPressKit
 
 struct DomainsService {
     let remote: DomainsServiceRemote
 
-    private let context: NSManagedObjectContext
+    fileprivate let context: NSManagedObjectContext
 
     init(managedObjectContext context: NSManagedObjectContext, remote: DomainsServiceRemote) {
         self.context = context
         self.remote = remote
     }
 
-    func refreshDomainsForSite(siteID: Int, completion: (Bool) -> Void) {
+    func refreshDomainsForSite(_ siteID: Int, completion: @escaping (Bool) -> Void) {
         remote.getDomainsForSite(siteID, success: { domains in
             self.mergeDomains(domains, forSite: siteID)
             completion(true)
@@ -19,14 +21,14 @@ struct DomainsService {
         })
     }
 
-    private func mergeDomains(domains: [Domain], forSite siteID: Int) {
+    fileprivate func mergeDomains(_ domains: [Domain], forSite siteID: Int) {
         let remoteDomains = domains
         let localDomains = domainsForSite(siteID)
 
         let remoteDomainNames = Set(remoteDomains.map({ $0.domainName }))
         let localDomainNames = Set(localDomains.map({ $0.domainName }))
 
-        let removedDomainNames = localDomainNames.subtract(remoteDomainNames)
+        let removedDomainNames = localDomainNames.subtracting(remoteDomainNames)
         removeDomains(removedDomainNames, fromSite: siteID)
 
         // Let's try to only update objects that have changed
@@ -38,7 +40,7 @@ struct DomainsService {
             if let existingDomain = managedDomainWithName(remoteDomain.domainName, forSite: siteID),
                 let blog = blogForSiteID(siteID) {
                 existingDomain.updateWith(remoteDomain, blog: blog)
-                DDLogSwift.logDebug("Updated domain \(existingDomain)")
+                DDLogDebug("Updated domain \(existingDomain)")
             } else {
                 createManagedDomain(remoteDomain, forSite: siteID)
             }
@@ -47,63 +49,63 @@ struct DomainsService {
         ContextManager.sharedInstance().saveContextAndWait(context)
     }
 
-    private func blogForSiteID(siteID: Int) -> Blog? {
+    fileprivate func blogForSiteID(_ siteID: Int) -> Blog? {
         let service = BlogService(managedObjectContext: context)
 
-        guard let blog = service.blogByBlogId(siteID) else {
+        guard let blog = service.blog(byBlogId: NSNumber(value: siteID)) else {
             let error = "Tried to obtain a Blog for a non-existing site (ID: \(siteID))"
             assertionFailure(error)
-            DDLogSwift.logError(error)
+            DDLogError(error)
             return nil
         }
 
         return blog
     }
 
-    private func managedDomainWithName(domainName: String, forSite siteID: Int) -> ManagedDomain? {
+    fileprivate func managedDomainWithName(_ domainName: String, forSite siteID: Int) -> ManagedDomain? {
         guard let blog = blogForSiteID(siteID) else { return nil }
 
-        let request = NSFetchRequest(entityName: ManagedDomain.entityName)
+        let request = NSFetchRequest<NSFetchRequestResult>(entityName: ManagedDomain.entityName)
         request.predicate = NSPredicate(format: "%K = %@ AND %K = %@", ManagedDomain.Relationships.blog, blog, ManagedDomain.Attributes.domainName, domainName)
         request.fetchLimit = 1
-        let results = (try? context.executeFetchRequest(request) as! [ManagedDomain]) ?? []
+        let results = (try? context.fetch(request) as! [ManagedDomain]) ?? []
         return results.first
     }
 
-    private func createManagedDomain(domain: Domain, forSite siteID: Int) {
+    fileprivate func createManagedDomain(_ domain: Domain, forSite siteID: Int) {
         guard let blog = blogForSiteID(siteID) else { return }
 
-        let managedDomain = NSEntityDescription.insertNewObjectForEntityForName(ManagedDomain.entityName, inManagedObjectContext: context) as! ManagedDomain
+        let managedDomain = NSEntityDescription.insertNewObject(forEntityName: ManagedDomain.entityName, into: context) as! ManagedDomain
         managedDomain.updateWith(domain, blog: blog)
-        DDLogSwift.logDebug("Created domain \(managedDomain)")
+        DDLogDebug("Created domain \(managedDomain)")
     }
 
-    private func domainsForSite(siteID: Int) -> [Domain] {
+    fileprivate func domainsForSite(_ siteID: Int) -> [Domain] {
         guard let blog = blogForSiteID(siteID) else { return [] }
 
-        let request = NSFetchRequest(entityName: ManagedDomain.entityName)
+        let request = NSFetchRequest<NSFetchRequestResult>(entityName: ManagedDomain.entityName)
         request.predicate = NSPredicate(format: "%K == %@", ManagedDomain.Relationships.blog, blog)
 
         let domains: [ManagedDomain]
         do {
-            domains = try context.executeFetchRequest(request) as! [ManagedDomain]
+            domains = try context.fetch(request) as! [ManagedDomain]
         } catch {
-            DDLogSwift.logError("Error fetching domains: \(error)")
+            DDLogError("Error fetching domains: \(error)")
             domains = []
         }
 
         return domains.map { Domain(managedDomain: $0) }
     }
 
-    private func removeDomains(domainNames: Set<String>, fromSite siteID: Int) {
+    fileprivate func removeDomains(_ domainNames: Set<String>, fromSite siteID: Int) {
         guard let blog = blogForSiteID(siteID) else { return }
 
-        let request = NSFetchRequest(entityName: ManagedDomain.entityName)
+        let request = NSFetchRequest<NSFetchRequestResult>(entityName: ManagedDomain.entityName)
         request.predicate = NSPredicate(format: "%K = %@ AND %K IN %@", ManagedDomain.Relationships.blog, blog, ManagedDomain.Attributes.domainName, domainNames)
-        let objects = (try? context.executeFetchRequest(request) as! [NSManagedObject]) ?? []
+        let objects = (try? context.fetch(request) as! [NSManagedObject]) ?? []
         for object in objects {
-            DDLogSwift.logDebug("Removing domain: \(object)")
-            context.deleteObject(object)
+            DDLogDebug("Removing domain: \(object)")
+            context.delete(object)
         }
     }
 }

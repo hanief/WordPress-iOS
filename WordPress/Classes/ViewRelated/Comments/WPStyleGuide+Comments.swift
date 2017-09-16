@@ -3,10 +3,8 @@ import WordPressShared
 
 /// This class groups all of the styles used by all of the CommentsViewController.
 ///
-extension WPStyleGuide
-{
-    public struct Comments
-    {
+extension WPStyleGuide {
+    public struct Comments {
         // MARK: - Public Properties
         //
         public static func gravatarPlaceholderImage(isApproved approved: Bool) -> UIImage {
@@ -20,69 +18,83 @@ extension WPStyleGuide
         public static func detailsRegularStyle(isApproved approved: Bool) -> [String : AnyObject] {
             let color = approved ? WPStyleGuide.littleEddieGrey() : WPStyleGuide.alertYellowDark()
 
-            return  [   NSParagraphStyleAttributeName   : titleParagraph,
-                        NSFontAttributeName             : titleRegularFont,
-                        NSForegroundColorAttributeName  : color ]
+            return  [   NSParagraphStyleAttributeName: titleParagraph,
+                        NSFontAttributeName: titleRegularFont,
+                        NSForegroundColorAttributeName: color ]
         }
 
         public static func detailsRegularRedStyle(isApproved approved: Bool) -> [String : AnyObject] {
             let color = approved ? WPStyleGuide.littleEddieGrey() : WPStyleGuide.alertRedDarker()
 
-            return  [   NSParagraphStyleAttributeName   : titleParagraph,
-                        NSFontAttributeName             : titleRegularFont,
-                        NSForegroundColorAttributeName  : color ]
+            return  [   NSParagraphStyleAttributeName: titleParagraph,
+                        NSFontAttributeName: titleRegularFont,
+                        NSForegroundColorAttributeName: color ]
         }
 
         public static func detailsItalicsStyle(isApproved approved: Bool) -> [String : AnyObject] {
             let color = approved ? WPStyleGuide.littleEddieGrey() : WPStyleGuide.alertRedDarker()
 
-            return  [   NSParagraphStyleAttributeName   : titleParagraph,
-                        NSFontAttributeName             : titleItalicsFont,
-                        NSForegroundColorAttributeName  : color ]
+            return  [   NSParagraphStyleAttributeName: titleParagraph,
+                        NSFontAttributeName: titleItalicsFont,
+                        NSForegroundColorAttributeName: color ]
         }
 
         public static func detailsBoldStyle(isApproved approved: Bool) -> [String : AnyObject] {
             let color = approved ? WPStyleGuide.littleEddieGrey() : WPStyleGuide.alertRedDarker()
 
-            return  [   NSParagraphStyleAttributeName   : titleParagraph,
-                        NSFontAttributeName             : titleBoldFont,
-                        NSForegroundColorAttributeName  : color ]
+            return  [   NSParagraphStyleAttributeName: titleParagraph,
+                        NSFontAttributeName: titleBoldFont,
+                        NSForegroundColorAttributeName: color ]
         }
 
         public static func timestampStyle(isApproved approved: Bool) -> [String: AnyObject] {
             let color = approved ? WPStyleGuide.allTAllShadeGrey() : WPStyleGuide.alertYellowDark()
 
-            return  [   NSFontAttributeName             : timestampFont,
-                        NSForegroundColorAttributeName  : color ]
+            return  [   NSFontAttributeName: timestampFont,
+                        NSForegroundColorAttributeName: color ]
         }
 
         public static func backgroundColor(isApproved approved: Bool) -> UIColor {
-            return approved ? UIColor.whiteColor() : WPStyleGuide.alertYellowLighter()
+            return approved ? UIColor.white : WPStyleGuide.alertYellowLighter()
         }
 
         public static func timestampImage(isApproved approved: Bool) -> UIImage {
             let timestampImage = UIImage(named: "reader-postaction-time")!
-            return approved ? timestampImage : timestampImage.imageWithRenderingMode(.AlwaysTemplate)
+            return approved ? timestampImage : timestampImage.withRenderingMode(.alwaysTemplate)
         }
 
 
 
         // MARK: - Private Properties
         //
-        private static let gravatarApproved     = UIImage(named: "gravatar")!
-        private static let gravatarUnapproved   = UIImage(named: "gravatar-unapproved")!
+        fileprivate static let gravatarApproved     = UIImage(named: "gravatar")!
+        fileprivate static let gravatarUnapproved   = UIImage(named: "gravatar-unapproved")!
 
-        private static let timestampFont        = WPStyleGuide.subtitleFont()
+        private static var timestampFont: UIFont {
+            return WPStyleGuide.fontForTextStyle(.caption1)
+        }
 
-        private static let titleFontSize        = CGFloat(14)
-        private static let titleRegularFont     = WPFontManager.systemRegularFontOfSize(titleFontSize)
-        private static let titleBoldFont        = WPFontManager.systemSemiBoldFontOfSize(titleFontSize)
-        private static let titleItalicsFont     = WPFontManager.systemItalicFontOfSize(titleFontSize)
+        private static var titleRegularFont: UIFont {
+            return WPStyleGuide.fontForTextStyle(.footnote)
+        }
 
-        private static let titleLineSize        = CGFloat(18)
-        private static let titleParagraph       = NSMutableParagraphStyle(minLineHeight: titleLineSize,
-                                                    maxLineHeight:  titleLineSize,
-                                                    lineBreakMode:  .ByWordWrapping,
-                                                    alignment:      .Left)
+        private static var titleBoldFont: UIFont {
+            return WPStyleGuide.fontForTextStyle(.footnote, fontWeight: UIFontWeightSemibold)
+        }
+
+        private static var titleItalicsFont: UIFont {
+            return WPStyleGuide.fontForTextStyle(.footnote, symbolicTraits: .traitItalic)
+        }
+
+        private static var titleLineSize: CGFloat {
+            return WPStyleGuide.fontSizeForTextStyle(.footnote) * 1.3
+        }
+
+        private static var titleParagraph: NSMutableParagraphStyle {
+            return NSMutableParagraphStyle(minLineHeight: titleLineSize,
+                                           maxLineHeight:  titleLineSize,
+                                           lineBreakMode:  .byTruncatingTail,
+                                           alignment:      .natural)
+        }
     }
 }

@@ -16,10 +16,10 @@
  @param thumbnailCallback a block that will be invoked when the thumbail for the media object is ready
  @param completion a block that will be invoked when the media is created, on success it will return a valid Media object, on failure it will return a nil Media and an error object with the details.
  */
-- (void)createMediaWithURL:(NSURL *)url
-           forPostObjectID:(NSManagedObjectID *)postObjectID
-         thumbnailCallback:(void (^)(NSURL *thumbnailURL))thumbnailCallback
-                completion:(void (^)(Media *media, NSError *error))completion;
+- (void)createMediaWithURL:(nonnull NSURL *)url
+           forPostObjectID:(nonnull NSManagedObjectID *)postObjectID
+         thumbnailCallback:(nullable void (^)(NSURL * _Nonnull thumbnailURL))thumbnailCallback
+                completion:(nullable void (^)(Media * _Nullable media, NSError * _Nullable error))completion NS_SWIFT_NAME(createMedia(url:forPost:thumbnailCallback:completion:));
 
 /**
  Create a Media object using the asset as the source and making it a child of the post with postObjectId.
@@ -29,16 +29,26 @@
  @param thumbnailCallback a block that will be invoked when the thumbail for the media object is ready
  @param completion a block that will be invoked when the media is created, on success it will return a valid Media object, on failure it will return a nil Media and an error object with the details.
  */
-- (void)createMediaWithPHAsset:(PHAsset *)asset
-             forPostObjectID:(NSManagedObjectID *)postObjectID
-           thumbnailCallback:(void (^)(NSURL *thumbnailURL))thumbnailCallback
-                  completion:(void (^)(Media *media, NSError *error))completion;
+- (void)createMediaWithPHAsset:(nonnull PHAsset *)asset
+             forPostObjectID:(nonnull NSManagedObjectID *)postObjectID
+           thumbnailCallback:(nullable void (^)(NSURL * _Nonnull thumbnailURL))thumbnailCallback
+                    completion:(nullable void (^)(Media * _Nullable media, NSError * _Nullable error))completion;
 
-- (void)createMediaWithImage:(UIImage *)image
-                 withMediaID:(NSString *)mediaID
-             forPostObjectID:(NSManagedObjectID *)postObjectID
-           thumbnailCallback:(void (^)(NSURL *thumbnailURL))thumbnailCallback
-                  completion:(void (^)(Media *media, NSError *error))completion;
+- (void)createMediaWithImage:(nonnull UIImage *)image
+                 withMediaID:(nonnull NSString *)mediaID
+             forPostObjectID:(nonnull NSManagedObjectID *)postObjectID
+           thumbnailCallback:(nullable void (^)(NSURL * _Nonnull thumbnailURL))thumbnailCallback
+                  completion:(nullable void (^)(Media * _Nullable media, NSError * _Nullable error))completion;
+
+- (void)createMediaWithPHAsset:(nonnull PHAsset *)asset
+               forBlogObjectID:(nonnull NSManagedObjectID *)blogObjectID
+             thumbnailCallback:(nullable void (^)(NSURL * _Nonnull thumbnailURL))thumbnailCallback
+                    completion:(nullable void (^)(Media * _Nullable media, NSError * _Nullable error))completion;
+
+- (void)createMediaWithImage:(nonnull UIImage *)image
+             forBlogObjectID:(nonnull NSManagedObjectID *)blogObjectID
+           thumbnailCallback:(nullable void (^)(NSURL * _Nonnull thumbnailURL))thumbnailCallback
+                  completion:(nullable void (^)(Media * _Nullable media, NSError * _Nullable error))completion;
 
 /**
  Get the Media object from the server using the blog and the mediaID as the identifier of the resource
@@ -48,10 +58,10 @@
  @param success a block that will be invoked when the media is retrieved
  @param failure a block that will be invoked if an error happens returnin the associated error object with the details.
  */
-- (void)getMediaWithID:(NSNumber *)mediaID
-                inBlog:(Blog *)blog
-           withSuccess:(void (^)(Media *media))success
-               failure:(void (^)(NSError *error))failure;
+- (void)getMediaWithID:(nonnull NSNumber *)mediaID
+                inBlog:(nonnull Blog *)blog
+           withSuccess:(nullable void (^)(Media * _Nonnull media))success
+               failure:(nullable void (^)(NSError * _Nonnull error))failure;
 
 /**
  Uploads the Media object to the server.
@@ -61,10 +71,10 @@
  @param success a block that will be invoked when the media upload finished with success
  @param failure a block that will be invoked when there is upload error.
  */
-- (void)uploadMedia:(Media *)media
-           progress:(NSProgress **) progress
-            success:(void (^)())success
-            failure:(void (^)(NSError *error))failure;
+- (void)uploadMedia:(nonnull Media *)media
+           progress:(NSProgress * __nullable __autoreleasing * __nullable) progress
+            success:(nullable void (^)())success
+            failure:(nullable void (^)(NSError * _Nonnull error))failure;
 
 
 /**
@@ -76,9 +86,9 @@
  @success a block that will be invoked when the media upload finished with success
  @failure a block that will be invoked when there is upload error.
  */
-- (void)updateMedia:(Media *)media
-            success:(void (^)())success
-            failure:(void (^)(NSError *error))failure;
+- (void)updateMedia:(nonnull Media *)media
+            success:(nullable void (^)())success
+            failure:(nullable void (^)(NSError * _Nonnull error))failure;
 
 /**
  Updates multiple media objects similar to -updateMedia:success:failure: but batches them
@@ -88,19 +98,33 @@
  @param mediaObjects An array of media objects to update
  @param success
  */
-- (void)updateMultipleMedia:(NSArray<Media *> *)mediaObjects
-             overallSuccess:(void (^)())overallSuccess
-                    failure:(void (^)(NSError *error))failure;
+- (void)updateMedia:(nonnull NSArray<Media *> *)mediaObjects
+     overallSuccess:(nullable void (^)())overallSuccess
+            failure:(nullable void (^)(NSError * _Nonnull error))failure;
 
 /**
- Find the media object in the local database.
- 
- @param mediaID
- @param blog
- 
- @return the Media object with the mediaID that belongs to the blog. Nil if not found.
+ Deletes the Media object from the server. Note the Media is deleted, not trashed.
+
+ @param media object to delete.
+ @param success a block that will be invoked when the media deletion finished with success
+ @param failure a block that will be invoked when there is an error.
  */
-- (Media *)findMediaWithID:(NSNumber *)mediaID inBlog:(Blog *)blog;
+- (void)deleteMedia:(nonnull Media *)media
+            success:(nullable void (^)())success
+            failure:(nullable void (^)(NSError * _Nonnull error))failure;
+
+/**
+ Deletes multiple Media objects from the server. Note the Media objects are deleted, not trashed.
+
+ @param mediaObjects An array of media objects to delete.
+ @param progress a block that will be invoked after each media item is deleted successfully
+ @param success a block that will be invoked when the media deletion finished with success
+ @param failure a block that will be invoked when there is an error.
+ */
+- (void)deleteMedia:(nonnull NSArray<Media *> *)mediaObjects
+           progress:(nullable void (^)(NSProgress *_Nonnull progress))progress
+            success:(nullable void (^)())success
+            failure:(nullable void (^)())failure;
 
 /**
  *  Obtains the  video url and poster image url for the video with the videoPressID
@@ -110,10 +134,10 @@
  *  @param success      return block if videopress info is found
  *  @param failure      return block if not information found.
  */
-- (void)getMediaURLFromVideoPressID:(NSString *)videoPressID
-                             inBlog:(Blog *)blog
-                            success:(void (^)(NSString *videoURL, NSString *posterURL))success
-                            failure:(void (^)(NSError *error))failure;
+- (void)getMediaURLFromVideoPressID:(nonnull NSString *)videoPressID
+                             inBlog:(nonnull Blog *)blog
+                            success:(nullable void (^)(NSString * _Nonnull videoURL, NSString * _Nullable posterURL))success
+                            failure:(nullable void (^)(NSError * _Nonnull error))failure;
 /**
  * Sync all Media objects from the server to local database
  
@@ -121,39 +145,48 @@
  * @param success a block that will be invoked when the sync succeeds
  * @param failure a block that will be invoked when the sync fails
  */
-- (void)syncMediaLibraryForBlog:(Blog *)blog
-                        success:(void (^)())success
-                        failure:(void (^)(NSError *error))failure;
+- (void)syncMediaLibraryForBlog:(nonnull Blog *)blog
+                        success:(nullable void (^)())success
+                        failure:(nullable void (^)(NSError * _Nonnull error))failure;
 
 /**
- + Get a thumbnail image for a Media by downloading its image or using the local cache
- +
- + @param media
- + @param success a block that will be invoked when the media is retrieved
- + @failure a block that will be invoked if an error happens returnin the associated error object with the details.
- + */
-- (void)thumbnailForMedia:(Media *)media
-                     size:(CGSize)size
-                  success:(void (^)(UIImage *image))success
-                  failure:(void (^)(NSError *error))failure;
+ Gets a local thumbnail image file URL for the Media item, or generates one, if available.
+
+ @discussion If the media asset is a video a frame of the video is returned.
+
+ @param mediaInRandomContext the Media object from where to get the thumbnail.
+ @param preferredSize the preferred size for the image in points. If set to CGSizeZero the resulting image will not
+        exceed the maximum dimension of the UIScreen size.
+ @param completion block that will be invoked when the thumbnail is ready, if available, or an error if something went wrong.
+ */
+- (void)thumbnailFileURLForMedia:(nonnull Media *)mediaInRandomContext
+                   preferredSize:(CGSize)preferredSize
+                      completion:(nonnull void (^)(NSURL * _Nullable url, NSError * _Nullable error))completion;
+/**
+ Gets a thumbnail image for the Media item, or generates one, if available.
+ 
+ @discussion If the media asset is a video a frame of the video is returned.
+
+ @param mediaInRandomContext the Media object from where to get the thumbnail.
+ @param preferredSize the preferred size for the image in points. If set to CGSizeZero the resulting image will not
+        exceed the maximum dimension of the UIScreen size.
+ @param completion block that will be invoked when the thumbnail is ready, if available, or an error if something went wrong.
+ */
+- (void)thumbnailImageForMedia:(nonnull Media *)mediaInRandomContext
+                 preferredSize:(CGSize)preferredSize
+                    completion:(nonnull void (^)(UIImage * _Nullable image, NSError * _Nullable error))completion;
 /**
  *  Get the number of items in a blog media library that are of a certain type.
  *
  *  @param blog from what blog to count the media items.
  *  @param mediaTypes set of media type values to be considered in the counting.
  */
-- (NSInteger)getMediaLibraryCountForBlog:(Blog *)blog
-                           forMediaTypes:(NSSet *)mediaTypes;
+- (NSInteger)getMediaLibraryCountForBlog:(nonnull Blog *)blog
+                           forMediaTypes:(nonnull NSSet *)mediaTypes;
 
-#pragma mark - Media cleanup
-
-/**
- *  @brief      Removes all unused media files from the media directories
- *  
- *  @discussion This method looks for any media files that stored inside the media folder that aren't
- * linked to any valid media object and remove them. These files can show up because of the app being killed
- * while a media object was being created or when a CoreData migration fails and the database is recreated.
- */
-+ (void)cleanUnusedMediaFileFromTmpDir;
+- (void)getMediaLibraryServerCountForBlog:(nonnull Blog *)blog
+                            forMediaTypes:(nonnull NSSet *)mediaTypes
+                                  success:(nullable void (^)(NSInteger count))success
+                                  failure:(nullable void (^)(NSError * _Nonnull error))failure;
 
 @end

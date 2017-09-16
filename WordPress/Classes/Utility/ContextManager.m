@@ -1,7 +1,7 @@
 #import "ContextManager.h"
 #import "ContextManager-Internals.h"
 #import "ALIterativeMigrator.h"
-
+@import WordPressShared.WPAnalytics;
 
 // MARK: - Static Variables
 //
@@ -186,6 +186,24 @@ static ContextManager *_override;
         return NO;
     }
     return YES;
+}
+
+- (void)mergeChanges:(NSManagedObjectContext *)context fromContextDidSaveNotification:(NSNotification *)notification
+{
+    [context performBlock:^{
+        // Fault-in updated objects before a merge to avoid any internal inconsistency errors later.
+        // Based on old solution referenced here: http://www.mlsite.net/blog/?p=518
+        NSSet* updates = [notification.userInfo objectForKey:NSUpdatedObjectsKey];
+        for (NSManagedObject *object in updates) {
+            NSManagedObject *objectInContext = [context existingObjectWithID:object.objectID error:nil];
+            if ([objectInContext isFault]) {
+                // Force a fault-in of the object's key-values
+                [objectInContext willAccessValueForKey:nil];
+            }
+        }
+        // Continue with the merge
+        [context mergeChangesFromContextDidSaveNotification:notification];
+    }];
 }
 
 - (BOOL)didMigrationFail

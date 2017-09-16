@@ -12,17 +12,19 @@
 #import "WPAccount.h"
 #import "WPAppAnalytics.h"
 #import "WPGUIConstants.h"
-#import "WPTableViewCell.h"
 #import "WPWebViewController.h"
 #import "WordPress-Swift.h"
 #import "MenusViewController.h"
 #import <Reachability/Reachability.h>
+#import <WordPressShared/WPTableViewCell.h>
 
 @import WordPressComStatsiOS;
 @import Gridicons;
 
 static NSString *const BlogDetailsCellIdentifier = @"BlogDetailsCell";
 static NSString *const BlogDetailsPlanCellIdentifier = @"BlogDetailsPlanCell";
+static NSString *const BlogDetailsSettingsCellIdentifier = @"BlogDetailsSettingsCell";
+static NSString *const BlogDetailsRemoveSiteCellIdentifier = @"BlogDetailsRemoveSiteCell";
 
 NSString * const WPBlogDetailsRestorationID = @"WPBlogDetailsID";
 NSString * const WPBlogDetailsBlogKey = @"WPBlogDetailsBlogKey";
@@ -31,6 +33,7 @@ NSString * const WPBlogDetailsSelectedIndexPathKey = @"WPBlogDetailsSelectedInde
 NSInteger const BlogDetailHeaderViewVerticalMargin = 18;
 CGFloat const BLogDetailGridiconAccessorySize = 17.0;
 NSTimeInterval const PreloadingCacheTimeout = 60.0 * 5; // 5 minutes
+NSString * const HideWPAdminDate = @"2015-09-07T00:00:00Z";
 
 // NOTE: Currently "stats" acts as the calypso dashboard with a redirect to
 // stats/insights. Per @mtias, if the dashboard should change at some point the
@@ -49,6 +52,7 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
 @property (nonatomic, strong) UIImageView *accessoryView;
 @property (nonatomic, strong) NSString *detail;
 @property (nonatomic) BOOL showsSelectionState;
+@property (nonatomic) BOOL forDestructiveAction;
 @property (nonatomic, copy) void (^callback)();
 
 @end
@@ -104,13 +108,14 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
 
 #pragma mark -
 
-@interface BlogDetailsViewController () <UIActionSheetDelegate, UIAlertViewDelegate, WPSplitViewControllerDetailProvider>
+@interface BlogDetailsViewController () <UIActionSheetDelegate, UIAlertViewDelegate, WPSplitViewControllerDetailProvider, BlogDetailHeaderViewDelegate, UIViewControllerTransitioningDelegate>
 
 @property (nonatomic, strong) BlogDetailHeaderView *headerView;
 @property (nonatomic, strong) NSArray *headerViewHorizontalConstraints;
 @property (nonatomic, strong) NSArray *tableSections;
 @property (nonatomic, strong) WPStatsService *statsService;
 @property (nonatomic, strong) BlogService *blogService;
+@property (nonatomic, strong) SiteIconPickerPresenter *siteIconPickerPresenter;
 
 /// Used to restore the tableview selection during state restoration, and
 /// also when switching between a collapsed and expanded split view controller presentation
@@ -164,7 +169,8 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
     [coder encodeObject:[[self.blog.objectID URIRepresentation] absoluteString] forKey:WPBlogDetailsBlogKey];
 
     WPSplitViewController *splitViewController = (WPSplitViewController *)self.splitViewController;
-    UIViewController *detailViewController = splitViewController.topDetailViewController;
+
+    UIViewController *detailViewController = [splitViewController rootDetailViewController];
     if (detailViewController && [detailViewController conformsToProtocol:@protocol(UIViewControllerRestoration)]) {
         // If the current detail view controller supports state restoration, store the current selection
         [coder encodeObject:self.restorableSelectedIndexPath forKey:WPBlogDetailsSelectedIndexPathKey];
@@ -204,20 +210,26 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
 {
     [super viewDidLoad];
 
+    self.view.accessibilityIdentifier = @"Blog Details Table";
+
     [WPStyleGuide configureColorsForView:self.view andTableView:self.tableView];
+    [WPStyleGuide configureAutomaticHeightRowsFor:self.tableView];
     
     [self.tableView registerClass:[WPTableViewCell class] forCellReuseIdentifier:BlogDetailsCellIdentifier];
     [self.tableView registerClass:[WPTableViewCellValue1 class] forCellReuseIdentifier:BlogDetailsPlanCellIdentifier];
+    [self.tableView registerClass:[WPTableViewCellValue1 class] forCellReuseIdentifier:BlogDetailsSettingsCellIdentifier];
+    [self.tableView registerClass:[WPTableViewCell class] forCellReuseIdentifier:BlogDetailsRemoveSiteCellIdentifier];
 
     self.clearsSelectionOnViewWillAppear = NO;
 
     __weak __typeof(self) weakSelf = self;
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
     self.blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-    [self.blogService syncBlog:_blog completionHandler:^() {
-        [weakSelf configureTableViewData];
-        [weakSelf reloadTableViewPreservingSelection];
-    }];
+    [self.blogService syncBlogAndAllMetadata:_blog
+                           completionHandler:^{
+                               [weakSelf configureTableViewData];
+                               [weakSelf reloadTableViewPreservingSelection];
+                           }];
     if (self.blog.account && !self.blog.account.userID) {
         // User's who upgrade may not have a userID recorded.
         AccountService *acctService = [[AccountService alloc] initWithManagedObjectContext:context];
@@ -250,6 +262,13 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
 
     [self reloadTableViewPreservingSelection];
     [self preloadBlogData];
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+    [super viewDidAppear:animated];
+
+    [self showAztecAnnouncement];
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection
@@ -316,6 +335,14 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
     return _restorableSelectedIndexPath;
 }
 
+- (SiteIconPickerPresenter *)siteIconPickerPresenter
+{
+    if (!_siteIconPickerPresenter) {
+        _siteIconPickerPresenter = [[SiteIconPickerPresenter alloc]initWithBlog:self.blog];
+    }
+    return _siteIconPickerPresenter;
+}
+
 #pragma mark - Data Model setup
 
 - (void)reloadTableViewPreservingSelection
@@ -344,15 +371,6 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
     return (cellIsNotFullyVisible) ? UITableViewScrollPositionMiddle : UITableViewScrollPositionNone;
 }
 
-- (NSString *)adminRowTitle
-{
-    if (self.blog.isHostedAtWPcom) {
-        return NSLocalizedString(@"Dashboard", @"Action title. Noun. Opens the user's WordPress.com dashboard in an external browser.");
-    } else {
-        return NSLocalizedString(@"WP Admin", @"Action title. Noun. Opens the user's WordPress Admin in an external browser.");
-    }
-}
-
 - (void)configureTableViewData
 {
     NSMutableArray *marr = [NSMutableArray array];
@@ -362,6 +380,10 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
         [marr addObject:[self personalizeSectionViewModel]];
     }
     [marr addObject:[self configurationSectionViewModel]];
+    [marr addObject:[self externalSectionViewModel]];
+    if ([self.blog supports:BlogFeatureRemovable]) {
+        [marr addObject:[self removeSiteSectionViewModel]];
+    }
 
     // Assign non mutable copy.
     self.tableSections = [NSArray arrayWithArray:marr];
@@ -376,27 +398,6 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
                                                  callback:^{
                                                      [weakSelf showStats];
                                                  }]];
-
-    BlogDetailsRow *viewSiteRow = [[BlogDetailsRow alloc] initWithTitle:NSLocalizedString(@"View Site", @"Action title. Opens the user's site in an in-app browser")
-                                                                  image:[Gridicon iconOfType:GridiconTypeHouse]
-                                                               callback:^{
-                                                                   [weakSelf showViewSite];
-                                                               }];
-    viewSiteRow.showsSelectionState = NO;
-    [rows addObject:viewSiteRow];
-
-    BlogDetailsRow *row = [[BlogDetailsRow alloc] initWithTitle:[self adminRowTitle]
-                                                          image:[Gridicon iconOfType:GridiconTypeMySites]
-                                                       callback:^{
-                                                           [weakSelf showViewAdmin];
-                                                           [weakSelf.tableView deselectSelectedRowWithAnimation:YES];
-                                                       }];
-    UIImage *image = [Gridicon iconOfType:GridiconTypeExternal withSize:CGSizeMake(BLogDetailGridiconAccessorySize, BLogDetailGridiconAccessorySize)];
-    UIImageView *accessoryView = [[UIImageView alloc] initWithImage:image];
-    accessoryView.tintColor = [WPStyleGuide cellGridiconAccessoryColor]; // Match disclosure icon color.
-    row.accessoryView = accessoryView;
-    row.showsSelectionState = NO;
-    [rows addObject:row];
 
     if ([self.blog supports:BlogFeaturePlans]) {
         BlogDetailsRow *row = [[BlogDetailsRow alloc] initWithTitle:NSLocalizedString(@"Plans", @"Action title. Noun. Links to a blog's Plans screen.")
@@ -428,6 +429,12 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
                                                     image:[Gridicon iconOfType:GridiconTypePages]
                                                  callback:^{
                                                      [weakSelf showPageList];
+                                                 }]];
+
+    [rows addObject:[[BlogDetailsRow alloc] initWithTitle:NSLocalizedString(@"Media", @"Noun. Title. Links to the blog's Media library.")
+                                                    image:[Gridicon iconOfType:GridiconTypeImage]
+                                                 callback:^{
+                                                     [weakSelf showMediaLibrary];
                                                  }]];
 
     BlogDetailsRow *row = [[BlogDetailsRow alloc] initWithTitle:NSLocalizedString(@"Comments", @"Noun. Title. Links to the blog's Comments screen.")
@@ -488,16 +495,99 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
                                                      }]];
     }
 
-    [rows addObject:[[BlogDetailsRow alloc] initWithTitle:NSLocalizedString(@"Settings", @"Noun. Title. Links to the blog's Settings screen.")
-                                                    image:[Gridicon iconOfType:GridiconTypeCog]
-                                                 callback:^{
-                                                     [weakSelf showSettings];
-                                                 }]];
+    if ([Feature enabled:FeatureFlagPluginManagement] && [self.blog supports:BlogFeaturePluginManagement]) {
+        [rows addObject:[[BlogDetailsRow alloc] initWithTitle:NSLocalizedString(@"Plugins", @"Noun. Title. Links to the plugin management feature.")
+                                                        image:[Gridicon iconOfType:GridiconTypePlugins]
+                                                     callback:^{
+                                                         [weakSelf showPlugins];
+                                                     }]];
+    }
+
+    BlogDetailsRow *row = [[BlogDetailsRow alloc] initWithTitle:NSLocalizedString(@"Settings", @"Noun. Title. Links to the blog's Settings screen.")
+                                                     identifier:BlogDetailsSettingsCellIdentifier
+                                                          image:[Gridicon iconOfType:GridiconTypeCog]
+                                                       callback:^{
+                                                           [weakSelf showSettings];
+                                                       }];
+
+    [rows addObject:row];
 
     NSString *title = NSLocalizedString(@"Configure", @"Section title for the configure table section in the blog details screen");
     return [[BlogDetailsSection alloc] initWithTitle:title andRows:rows];
 }
 
+- (BlogDetailsSection *)externalSectionViewModel
+{
+    __weak __typeof(self) weakSelf = self;
+    NSMutableArray *rows = [NSMutableArray array];
+    BlogDetailsRow *viewSiteRow = [[BlogDetailsRow alloc] initWithTitle:NSLocalizedString(@"View Site", @"Action title. Opens the user's site in an in-app browser")
+                                                                  image:[Gridicon iconOfType:GridiconTypeHouse]
+                                                               callback:^{
+                                                                   [weakSelf showViewSite];
+                                                               }];
+    viewSiteRow.showsSelectionState = NO;
+    [rows addObject:viewSiteRow];
+
+    if ([self shouldDisplayLinkToWPAdmin]) {
+        BlogDetailsRow *row = [[BlogDetailsRow alloc] initWithTitle:[self adminRowTitle]
+                                                              image:[Gridicon iconOfType:GridiconTypeMySites]
+                                                           callback:^{
+                                                               [weakSelf showViewAdmin];
+                                                               [weakSelf.tableView deselectSelectedRowWithAnimation:YES];
+                                                           }];
+        UIImage *image = [[Gridicon iconOfType:GridiconTypeExternal withSize:CGSizeMake(BLogDetailGridiconAccessorySize, BLogDetailGridiconAccessorySize)] imageFlippedForRightToLeftLayoutDirection];
+        UIImageView *accessoryView = [[UIImageView alloc] initWithImage:image];
+        accessoryView.tintColor = [WPStyleGuide cellGridiconAccessoryColor]; // Match disclosure icon color.
+        row.accessoryView = accessoryView;
+        row.showsSelectionState = NO;
+        [rows addObject:row];
+    }
+
+    NSString *title = NSLocalizedString(@"External", @"Section title for the external table section in the blog details screen");
+    return [[BlogDetailsSection alloc] initWithTitle:title andRows:rows];
+}
+
+- (BlogDetailsSection *)removeSiteSectionViewModel
+{
+    __weak __typeof(self) weakSelf = self;
+    NSMutableArray *rows = [NSMutableArray array];
+    BlogDetailsRow *removeSiteRow = [[BlogDetailsRow alloc] initWithTitle:NSLocalizedString(@"Remove Site", @"Button to remove a site from the app")
+                                                               identifier:BlogDetailsRemoveSiteCellIdentifier
+                                                                    image:nil
+                                                                 callback:^{
+                                                                     [weakSelf.tableView deselectSelectedRowWithAnimation:YES];
+                                                                     [weakSelf showRemoveSiteAlert];
+                                                                 }];
+    removeSiteRow.showsSelectionState = NO;
+    removeSiteRow.forDestructiveAction = YES;
+    [rows addObject:removeSiteRow];
+
+    return [[BlogDetailsSection alloc] initWithTitle:nil andRows:rows];
+
+}
+
+- (NSString *)adminRowTitle
+{
+    if (self.blog.isHostedAtWPcom) {
+        return NSLocalizedString(@"Dashboard", @"Action title. Noun. Opens the user's WordPress.com dashboard in an external browser.");
+    } else {
+        return NSLocalizedString(@"WP Admin", @"Action title. Noun. Opens the user's WordPress Admin in an external browser.");
+    }
+}
+
+// Non .com users and .com user whose accounts were created
+// before LastWPAdminAccessDate should have access to WPAdmin
+- (BOOL)shouldDisplayLinkToWPAdmin
+{
+    if (!self.blog.isHostedAtWPcom) {
+        return YES;
+    }
+    NSDate *hideWPAdminDate = [NSDate dateWithISO8601String:HideWPAdminDate];
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
+    WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
+    return [defaultAccount.dateCreated compare:hideWPAdminDate] == NSOrderedAscending;
+}
 
 #pragma mark - Configuration
 
@@ -511,6 +601,7 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
     // Blog detail header view
     BlogDetailHeaderView *headerView = [[BlogDetailHeaderView alloc] init];
     headerView.translatesAutoresizingMaskIntoConstraints = NO;
+    headerView.delegate = self;
     [headerWrapper addSubview:headerView];
 
     UILayoutGuide *readableGuide = headerWrapper.readableContentGuide;
@@ -521,6 +612,102 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
                                               [headerView.bottomAnchor constraintEqualToAnchor:headerWrapper.bottomAnchor],
                                               ]];
      self.headerView = headerView;
+}
+
+#pragma mark BlogDetailHeaderViewDelegate
+
+- (void)siteIconTapped
+{
+    if (!self.blog.isAdmin || !self.blog.isUploadingFilesAllowed) {
+        // Gracefully ignore the tap for users that can not upload files or
+        // blogs that do not have capabilities since those will not support the REST API icon update
+        return;
+    }
+    [self showUpdateSiteIconAlert];
+}
+
+#pragma mark Site Icon Update Management
+
+- (void)showUpdateSiteIconAlert
+{
+    UIAlertController *updateIconAlertController = [UIAlertController alertControllerWithTitle:nil
+                                                                                       message:nil
+                                                                                preferredStyle:UIAlertControllerStyleActionSheet];
+
+    updateIconAlertController.popoverPresentationController.sourceView = self.headerView.blavatarImageView.superview;
+    updateIconAlertController.popoverPresentationController.sourceRect = self.headerView.blavatarImageView.frame;
+    updateIconAlertController.popoverPresentationController.permittedArrowDirections = UIPopoverArrowDirectionAny;
+    
+    [updateIconAlertController addDefaultActionWithTitle:NSLocalizedString(@"Change Site Icon", @"Change site icon button")
+                                                 handler:^(UIAlertAction *action) {
+                                                     [self updateSiteIcon];
+                                                 }];
+    if (self.blog.hasIcon) {
+        [updateIconAlertController addDestructiveActionWithTitle:NSLocalizedString(@"Remove Site Icon", @"Remove site icon button")
+                                                         handler:^(UIAlertAction *action) {
+                                                             [self removeSiteIcon];
+                                                         }];
+    }
+    [updateIconAlertController addCancelActionWithTitle:NSLocalizedString(@"Cancel", @"Cancel button")
+                                                handler:nil];
+
+    [self presentViewController:updateIconAlertController animated:YES completion:nil];
+}
+
+- (void)updateSiteIcon
+{
+    self.siteIconPickerPresenter = [[SiteIconPickerPresenter alloc]initWithBlog:self.blog];
+    __weak __typeof(self) weakSelf = self;
+    self.siteIconPickerPresenter.onCompletion = ^(Media *media, NSError *error) {
+        if (error) {
+            [weakSelf showErrorForSiteIconUpdate];
+        } else if (media) {
+            [weakSelf updateBlogIconWithMedia:media];
+        } else {
+            // If no media and no error the picker was cancelled
+            [weakSelf dismissViewControllerAnimated:YES completion:nil];
+        }
+        weakSelf.siteIconPickerPresenter = nil;
+    };
+    self.siteIconPickerPresenter.onIconSelection = ^() {
+        weakSelf.headerView.updatingIcon = YES;
+        [weakSelf dismissViewControllerAnimated:YES completion:nil];
+    };
+    [self.siteIconPickerPresenter presentPickerFrom:self];
+}
+
+- (void)removeSiteIcon
+{
+    self.headerView.updatingIcon = YES;
+    self.blog.settings.iconMediaID = @0;
+    [self updateBlogSettingsAndRefreshIcon];
+}
+
+- (void)updateBlogIconWithMedia:(Media *)media
+{
+    self.blog.settings.iconMediaID = media.mediaID;
+    [self updateBlogSettingsAndRefreshIcon];
+}
+
+- (void)updateBlogSettingsAndRefreshIcon
+{
+    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:self.blog.managedObjectContext];
+    [blogService updateSettingsForBlog:self.blog
+                               success:^{
+        [blogService syncBlog:self.blog
+                      success:^{
+            self.headerView.updatingIcon = NO;
+            [self.headerView refreshIconImage];
+        } failure:nil];
+     } failure:^(NSError *error){
+         [self showErrorForSiteIconUpdate];
+     }];
+}
+
+- (void)showErrorForSiteIconUpdate
+{
+    [SVProgressHUD showDismissibleErrorWithStatus:NSLocalizedString(@"Icon update failed", @"Message to show when site icon update failed")];
+    self.headerView.updatingIcon = NO;
 }
 
 #pragma mark - Table view data source
@@ -541,6 +728,7 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
     BlogDetailsSection *section = [self.tableSections objectAtIndex:indexPath.section];
     BlogDetailsRow *row = [section.rows objectAtIndex:indexPath.row];
     cell.textLabel.text = row.title;
+    cell.accessibilityIdentifier = row.identifier;
     cell.detailTextLabel.text = row.detail;
     cell.imageView.image = row.image;
     if (row.accessoryView) {
@@ -553,11 +741,16 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
     BlogDetailsSection *section = [self.tableSections objectAtIndex:indexPath.section];
     BlogDetailsRow *row = [section.rows objectAtIndex:indexPath.row];
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:row.identifier];
-    cell.accessoryType = [self splitViewControllerIsHorizontallyCompact] ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
     cell.accessoryView = nil;
-    cell.textLabel.textAlignment = NSTextAlignmentLeft;
+    cell.textLabel.textAlignment = NSTextAlignmentNatural;
     cell.imageView.tintColor = [WPStyleGuide greyLighten10];
-    [WPStyleGuide configureTableViewCell:cell];
+    if (row.forDestructiveAction) {
+        cell.accessoryType = UITableViewCellAccessoryNone;
+        [WPStyleGuide configureTableViewDestructiveActionCell:cell];
+    } else {
+        cell.accessoryType = [self splitViewControllerIsHorizontallyCompact] ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
+        [WPStyleGuide configureTableViewCell:cell];
+    }
     [self configureCell:cell atIndexPath:indexPath];
 
     return cell;
@@ -571,17 +764,12 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
 
     if (row.showsSelectionState) {
         self.restorableSelectedIndexPath = indexPath;
-    } else {
+    } else if (![self splitViewControllerIsHorizontallyCompact]) {
         // Reselect the previous row
         [tableView selectRowAtIndexPath:self.restorableSelectedIndexPath
                                animated:YES
                          scrollPosition:UITableViewScrollPositionNone];
     }
-}
-
-- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    return WPTableViewDefaultRowHeight;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
@@ -628,7 +816,7 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
     NSString *oauthToken = self.blog.authToken;
     
     if (oauthToken) {
-        self.statsService = [[WPStatsService alloc] initWithSiteId:self.blog.siteID siteTimeZone:[self.blogService timeZoneForBlog:self.blog] oauth2Token:oauthToken andCacheExpirationInterval:5 * 60];
+        self.statsService = [[WPStatsService alloc] initWithSiteId:self.blog.dotComID siteTimeZone:[self.blogService timeZoneForBlog:self.blog] oauth2Token:oauthToken andCacheExpirationInterval:5 * 60];
         [self.statsService retrieveInsightsStatsWithAllTimeStatsCompletionHandler:nil insightsCompletionHandler:nil todaySummaryCompletionHandler:nil latestPostSummaryCompletionHandler:nil commentsAuthorCompletionHandler:nil commentsPostsCompletionHandler:nil tagsCategoriesCompletionHandler:nil followersDotComCompletionHandler:nil followersEmailCompletionHandler:nil publicizeCompletionHandler:nil streakCompletionHandler:nil progressBlock:nil andOverallCompletionHandler:nil];
     }
 }
@@ -724,16 +912,29 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
     [self showDetailViewController:controller sender:self];
 }
 
+- (void)showMediaLibrary
+{
+    [WPAppAnalytics track:WPAnalyticsStatOpenedMediaLibrary withBlog:self.blog];
+    MediaLibraryViewController *controller = [[MediaLibraryViewController alloc] initWithBlog:self.blog];
+    [self showDetailViewController:controller sender:self];
+}
+
 - (void)showPeople
 {
-    // TODO(@koke, 2015-11-02): add analytics
+    [WPAppAnalytics track:WPAnalyticsStatOpenedPeople withBlog:self.blog];
     PeopleViewController *controller = [PeopleViewController controllerWithBlog:self.blog];
+    [self showDetailViewController:controller sender:self];
+}
+
+- (void)showPlugins
+{
+    PluginListViewController *controller = [[PluginListViewController alloc] initWithBlog:self.blog];
     [self showDetailViewController:controller sender:self];
 }
 
 - (void)showPlans
 {
-    [WPAppAnalytics track:WPAnalyticsStatOpenedPlans];
+    [WPAppAnalytics track:WPAnalyticsStatOpenedPlans withBlog:self.blog];
     PlanListViewController *controller = [[PlanListViewController alloc] initWithBlog:self.blog];
     [self showDetailViewController:controller sender:self];
 }
@@ -822,9 +1023,51 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
     } else {
         dashboardUrl = [self.blog adminUrlWithPath:@""];
     }
-    [[UIApplication sharedApplication] openURL:[NSURL URLWithString:dashboardUrl]];
+    [[UIApplication sharedApplication] openURL:[NSURL URLWithString:dashboardUrl] options:nil completionHandler:nil];
 }
 
+- (void)showAztecAnnouncement
+{
+    if (![[NSUserDefaults standardUserDefaults] aztecAnnouncementWasDisplayed]) {
+        [[NSUserDefaults standardUserDefaults] setAztecAnnouncementWasDisplayed:YES];
+
+        FancyAlertViewController *controller = [FancyAlertViewController aztecAnnouncementController];
+        controller.modalPresentationStyle = UIModalPresentationCustom;
+        controller.transitioningDelegate = self;
+
+        [self.tabBarController presentViewController:controller animated:YES completion:nil];
+    }
+}
+
+#pragma mark - Remove Site
+
+- (void)showRemoveSiteAlert
+{
+    NSString *model = [[UIDevice currentDevice] localizedModel];
+    NSString *message = [NSString stringWithFormat:NSLocalizedString(@"Are you sure you want to continue?\n All site data will be removed from your %@.", @"Title for the remove site confirmation alert, %@ will be replaced with iPhone/iPad/iPod Touch"), model];
+    NSString *cancelTitle = NSLocalizedString(@"Cancel", nil);
+    NSString *destructiveTitle = NSLocalizedString(@"Remove Site", @"Button to remove a site from the app");
+
+    UIAlertControllerStyle alertStyle = [UIDevice isPad] ? UIAlertControllerStyleAlert : UIAlertControllerStyleActionSheet;
+    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:nil
+                                                                             message:message
+                                                                      preferredStyle:alertStyle];
+
+    [alertController addCancelActionWithTitle:cancelTitle handler:nil];
+    [alertController addDestructiveActionWithTitle:destructiveTitle handler:^(UIAlertAction *action) {
+        [self confirmRemoveSite];
+    }];
+
+    [self presentViewController:alertController animated:YES completion:nil];
+}
+
+- (void)confirmRemoveSite
+{
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
+    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
+    [blogService removeBlog:self.blog];
+    [self.navigationController popToRootViewControllerAnimated:YES];
+}
 
 #pragma mark - Notification handlers
 
@@ -836,7 +1079,7 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
     }
 
     NSSet *updatedObjects = note.userInfo[NSUpdatedObjectsKey];
-    if ([updatedObjects containsObject:self.blog]) {
+    if ([updatedObjects containsObject:self.blog] || [updatedObjects containsObject:self.blog.settings]) {
         self.navigationItem.title = self.blog.settings.name;
         [self reloadTableViewPreservingSelection];
     }
@@ -851,6 +1094,18 @@ NSString * const WPCalypsoDashboardPath = @"https://wordpress.com/stats/";
     statsView.statsService = self.statsService;
 
     return statsView;
+}
+
+#pragma mark - UIViewControllerTransitioningDelegate
+
+- (UIPresentationController *)presentationControllerForPresentedViewController:(UIViewController *)presented presentingViewController:(UIViewController *)presenting sourceViewController:(UIViewController *)source
+{
+    if ([presented isKindOfClass:[FancyAlertViewController class]]) {
+        return [[FancyAlertPresentationController alloc] initWithPresentedViewController:presented
+                                                                presentingViewController:presenting];
+    }
+
+    return nil;
 }
 
 @end

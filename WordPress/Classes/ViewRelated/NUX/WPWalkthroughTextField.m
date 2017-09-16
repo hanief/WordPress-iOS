@@ -1,6 +1,9 @@
 #import "WPWalkthroughTextField.h"
 #import "Constants.h"
-#import "WPNUXUtility.h"
+#import <WordPressShared/WPNUXUtility.h>
+#import "WordPress-Swift.h"
+
+NSInteger const LeftImageSpacing = 8;
 
 @import Gridicons;
 
@@ -63,6 +66,7 @@
     self.secureTextEntryImageHidden = [Gridicon iconOfType:GridiconTypeNotVisible];
 
     self.secureTextEntryToggle = [UIButton buttonWithType:UIButtonTypeCustom];
+    self.secureTextEntryToggle.clipsToBounds = true;
     self.secureTextEntryToggle.tintColor = [WPStyleGuide greyLighten10];
     self.secureTextEntryToggle.frame = CGRectMake(0, 0, 40, 30);
     [self.secureTextEntryToggle addTarget:self action:@selector(secureTextEntryToggleAction:) forControlEvents:UIControlEventTouchUpInside];
@@ -108,12 +112,30 @@
 
     self.secureTextEntryToggle.hidden = !self.showSecureTextEntryToggle;
     if (self.showSecureTextEntryToggle) {
-        self.secureTextEntryToggle.frame = CGRectIntegral(CGRectMake(CGRectGetWidth(self.bounds) - CGRectGetWidth(self.secureTextEntryToggle.frame),
-                                                                     (CGRectGetHeight(self.bounds) - CGRectGetHeight(self.secureTextEntryToggle.frame)) / 2.0,
-                                                                     CGRectGetWidth(self.secureTextEntryToggle.frame),
-                                                                     CGRectGetHeight(self.secureTextEntryToggle.frame)));
+        CGFloat secureImagePadding = [self calculateSecureImagePadding];
+        CGRect frame = self.secureTextEntryToggle.frame;
+        if ([self userInterfaceLayoutDirection] == UIUserInterfaceLayoutDirectionLeftToRight) {
+            frame = CGRectIntegral(CGRectMake(CGRectGetWidth(self.bounds) - CGRectGetWidth(self.secureTextEntryToggle.frame) - secureImagePadding,
+                                              (CGRectGetHeight(self.bounds) - CGRectGetHeight(self.secureTextEntryToggle.frame)) / 2.0,
+                                              CGRectGetWidth(self.secureTextEntryToggle.frame),
+                                              CGRectGetHeight(self.secureTextEntryToggle.frame)));
+        } else {
+            frame = CGRectIntegral(CGRectMake(CGRectGetMinX(self.bounds) + secureImagePadding,
+                                              (CGRectGetHeight(self.bounds) - CGRectGetHeight(self.secureTextEntryToggle.frame)) / 2.0,
+                                              CGRectGetWidth(self.secureTextEntryToggle.frame),
+                                              CGRectGetHeight(self.secureTextEntryToggle.frame)));
+        }
+        self.secureTextEntryToggle.frame = frame;
         [self bringSubviewToFront:self.secureTextEntryToggle];
     }
+}
+
+- (CGFloat)calculateSecureImagePadding {
+    CGFloat desiredPadding = 20.0;
+    CGSize imageSize = self.secureTextEntryToggle.imageView.image.size;
+    CGSize buttonSize = self.secureTextEntryToggle.frame.size;
+    CGFloat buttonPadding = (buttonSize.width - imageSize.width) / 2.0;
+    return desiredPadding - buttonPadding;
 }
 
 - (CGRect)calculateTextRectForBounds:(CGRect)bounds
@@ -122,7 +144,7 @@
     
     if (_leftViewImage) {
         CGFloat leftViewWidth = _leftViewImage.size.width;
-        returnRect = CGRectMake(leftViewWidth + 2 * _textInsets.left, _textInsets.top, bounds.size.width - leftViewWidth - 2 * _textInsets.left - _textInsets.right, bounds.size.height - _textInsets.top - _textInsets.bottom);
+        returnRect = CGRectMake(leftViewWidth + LeftImageSpacing + _textInsets.left, _textInsets.top, bounds.size.width - leftViewWidth - LeftImageSpacing - _textInsets.left - _textInsets.right, bounds.size.height - _textInsets.top - _textInsets.bottom);
     } else {
         returnRect = CGRectMake(_textInsets.left, _textInsets.top, bounds.size.width - _textInsets.left - _textInsets.right, bounds.size.height - _textInsets.top - _textInsets.bottom);
     }

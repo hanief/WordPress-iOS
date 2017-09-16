@@ -1,7 +1,6 @@
 #import "BlogDetailHeaderView.h"
 #import "Blog.h"
 #import "UIImageView+Gravatar.h"
-#import <WordPressShared/WPFontManager.h>
 #import "WordPress-Swift.h"
 
 
@@ -11,42 +10,77 @@ const CGFloat BlogDetailHeaderViewLabelHorizontalPadding = 10.0;
 @interface BlogDetailHeaderView ()
 
 @property (nonatomic, strong) UIStackView *stackView;
-@property (nonatomic, strong) UIImageView *blavatarImageView;
+@property (nonatomic, strong) UIActivityIndicatorView *blavatarUpdateActivityIndicatorView;
 @property (nonatomic, strong) UIStackView *labelsStackView;
-@property (nonatomic, strong) UILabel *titleLabel;
-@property (nonatomic, strong) UILabel *subtitleLabel;
 
 @end
 
 @implementation BlogDetailHeaderView
 
+- (void)awakeFromNib
+{
+    [super awakeFromNib];
+    [self performSetup];
+}
+
 - (instancetype)initWithFrame:(CGRect)frame
 {
     self = [super initWithFrame:frame];
     if (self) {
-
-        self.preservesSuperviewLayoutMargins = YES;
-
-        [self setupStackView];
-        [self setupBlavatarImageView];
-        [self setupLabelsStackView];
-        [self setupTitleLabel];
-        [self setupSubtitleLabel];
+        [self performSetup];
     }
     return self;
+}
+
+- (void)performSetup
+{
+    self.preservesSuperviewLayoutMargins = YES;
+    [self setupStackView];
+    [self setupBlavatarImageView];
+    [self setupLabelsStackView];
+    [self setupTitleLabel];
+    [self setupSubtitleLabel];
 }
 
 #pragma mark - Public Methods
 
 - (void)setBlog:(Blog *)blog
 {
-    [self.blavatarImageView setImageWithSiteIcon:blog.icon];
+    _blog = blog;
+    [self refreshIconImage];
 
     // if the blog name is missing, we want to show the blog displayURL instead
     NSString *blogName = blog.settings.name;
-    [self.titleLabel setText:((blogName && !blogName.isEmpty) ? blogName : blog.displayURL)];
-    [self.subtitleLabel setText:blog.displayURL];
+    NSString *title = (blogName && !blogName.isEmpty) ? blogName : blog.displayURL;
+    [self setTitleText:title];
+    [self setSubtitleText:blog.displayURL];
     [self.labelsStackView setNeedsLayout];
+}
+
+- (void)setTitleText:(NSString *)title
+{
+    [self.titleLabel setText:title];
+    [self.labelsStackView setNeedsLayout];
+}
+
+- (void)setSubtitleText:(NSString *)subtitle
+{
+    [self.subtitleLabel setText:subtitle];
+    [self.labelsStackView setNeedsLayout];
+}
+
+- (void)loadImageAtPath:(NSString *)imagePath
+{
+    [self.blavatarImageView setImageWithSiteIcon:imagePath];
+}
+
+- (void)refreshIconImage
+{
+    if (self.blog.hasIcon) {
+        [self.blavatarImageView setImageWithSiteIconForBlog:self.blog placeholderImage:nil];
+    } else {
+        [self.blavatarImageView setDefaultSiteIconImage];
+    }
 }
 
 #pragma mark - Subview setup
@@ -79,13 +113,36 @@ const CGFloat BlogDetailHeaderViewLabelHorizontalPadding = 10.0;
     imageView.translatesAutoresizingMaskIntoConstraints = NO;
     imageView.layer.borderColor = [[UIColor whiteColor] CGColor];
     imageView.layer.borderWidth = 1.0;
+    imageView.userInteractionEnabled = YES;
+    UITapGestureRecognizer *singleTap = [[UITapGestureRecognizer alloc] initWithTarget:self
+                                                                                action:@selector(blavatarImageTapped)];
+    singleTap.numberOfTapsRequired = 1;
+    [imageView addGestureRecognizer:singleTap];
+
     [_stackView addArrangedSubview:imageView];
 
+    NSLayoutConstraint *heightConstraint = [imageView.heightAnchor constraintEqualToConstant:BlogDetailHeaderViewBlavatarSize];
+    heightConstraint.priority = 999;
     [NSLayoutConstraint activateConstraints:@[
                                               [imageView.widthAnchor constraintEqualToConstant:BlogDetailHeaderViewBlavatarSize],
-                                              [imageView.heightAnchor constraintEqualToConstant:BlogDetailHeaderViewBlavatarSize]
+                                              heightConstraint
                                               ]];
     _blavatarImageView = imageView;
+}
+
+- (UIActivityIndicatorView *)blavatarUpdateActivityIndicatorView {
+    if (!_blavatarUpdateActivityIndicatorView) {
+        _blavatarUpdateActivityIndicatorView = [[UIActivityIndicatorView alloc]initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhiteLarge];
+        _blavatarUpdateActivityIndicatorView.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.blavatarImageView addSubview:_blavatarUpdateActivityIndicatorView];
+        [self.blavatarImageView pinSubviewAtCenter:_blavatarUpdateActivityIndicatorView];
+    }
+    return _blavatarUpdateActivityIndicatorView;
+}
+
+-(void)blavatarImageTapped
+{
+    [self.delegate siteIconTapped];
 }
 
 - (void)setupLabelsStackView
@@ -116,8 +173,8 @@ const CGFloat BlogDetailHeaderViewLabelHorizontalPadding = 10.0;
     label.backgroundColor = [UIColor clearColor];
     label.opaque = YES;
     label.textColor = [WPStyleGuide littleEddieGrey];
-    label.font = [WPFontManager systemRegularFontOfSize:16.0];
     label.adjustsFontSizeToFitWidth = NO;
+    [WPStyleGuide configureLabel:label textStyle:UIFontTextStyleCallout];
 
     [_labelsStackView addArrangedSubview:label];
 
@@ -134,12 +191,22 @@ const CGFloat BlogDetailHeaderViewLabelHorizontalPadding = 10.0;
     label.backgroundColor = [UIColor clearColor];
     label.opaque = YES;
     label.textColor = [WPStyleGuide allTAllShadeGrey];
-    label.font = [WPFontManager systemItalicFontOfSize:12.0];
     label.adjustsFontSizeToFitWidth = NO;
+    [WPStyleGuide configureLabel:label textStyle:UIFontTextStyleCaption1 symbolicTraits:UIFontDescriptorTraitItalic];
 
     [_labelsStackView addArrangedSubview:label];
 
     _subtitleLabel = label;
+}
+
+- (void)setUpdatingIcon:(BOOL)updatingIcon
+{
+    _updatingIcon = updatingIcon;
+    if (updatingIcon) {
+        [self.blavatarUpdateActivityIndicatorView startAnimating];
+    } else {
+        [self.blavatarUpdateActivityIndicatorView stopAnimating];
+    }
 }
 
 @end

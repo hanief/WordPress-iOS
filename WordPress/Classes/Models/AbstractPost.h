@@ -7,20 +7,12 @@ NS_ASSUME_NONNULL_BEGIN
 @class Media;
 @class Comment;
 
-typedef enum {
+typedef NS_ENUM(NSUInteger, AbstractPostRemoteStatus) {
     AbstractPostRemoteStatusPushing,    // Uploading post
     AbstractPostRemoteStatusFailed,      // Upload failed
     AbstractPostRemoteStatusLocal,       // Only local version
     AbstractPostRemoteStatusSync,       // Post uploaded
-} AbstractPostRemoteStatus;
-
-extern NSString * const PostStatusDraft;
-extern NSString * const PostStatusPending;
-extern NSString * const PostStatusPrivate;
-extern NSString * const PostStatusPublish;
-extern NSString * const PostStatusScheduled;
-extern NSString * const PostStatusTrash;
-extern NSString * const PostStatusDeleted;
+};
 
 @interface AbstractPost : BasePost
 
@@ -36,7 +28,7 @@ extern NSString * const PostStatusDeleted;
 @property (weak, readonly) AbstractPost *original;
 @property (weak, readonly) AbstractPost *revision;
 @property (nonatomic, strong) NSSet *comments;
-@property (nonatomic, strong) Media *featuredImage;
+@property (nonatomic, strong, nullable) Media *featuredImage;
 
 // By convention these should be treated as read only and not manually set.
 // These are primarily used as helpers sorting fetchRequests.
@@ -143,6 +135,11 @@ extern NSString * const PostStatusDeleted;
  Returns YES if the post is has a `future` post status
  */
 - (BOOL)isScheduled;
+
+/**
+ Returns YES if the post is a draft
+ */
+- (BOOL)isDraft;
 
 /**
  Returns YES if the post has a future date_created_gmt.

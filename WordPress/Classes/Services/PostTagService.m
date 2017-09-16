@@ -1,12 +1,8 @@
 #import "PostTagService.h"
 #import "Blog.h"
-#import "RemotePostTag.h"
 #import "PostTag.h"
 #import "ContextManager.h"
-#import "TaxonomyServiceRemote.h"
-#import "TaxonomyServiceRemoteREST.h"
-#import "TaxonomyServiceRemoteXMLRPC.h"
-#import "RemoteTaxonomyPaging.h"
+@import WordPressKit;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -68,6 +64,28 @@ NS_ASSUME_NONNULL_BEGIN
                           if (success) {
                               success(tags);
                           }
+                      } failure:failure];
+}
+
+- (void)getTopTagsForBlog:(Blog *)blog
+                  success:(nullable void (^)(NSArray <NSString *> *tags))success
+                  failure:(nullable void (^)(NSError *error))failure
+{
+    id<TaxonomyServiceRemote> remote = [self remoteForBlog:blog];
+    RemoteTaxonomyPaging *paging = [RemoteTaxonomyPaging new];
+    paging.orderBy = RemoteTaxonomyPagingResultsOrderingByCount;
+    paging.order = RemoteTaxonomyPagingOrderDescending;
+
+    [remote getTagsWithPaging:paging
+                      success:^(NSArray <RemotePostTag *> *remoteTags) {
+                          [self.managedObjectContext performBlock:^{
+                              NSArray *tags = [remoteTags wp_map:^NSString *(RemotePostTag *remoteTag) {
+                                  return remoteTag.name;
+                              }];
+                              if (success) {
+                                  success(tags);
+                              }
+                          }];
                       } failure:failure];
 }
 

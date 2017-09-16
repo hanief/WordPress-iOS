@@ -9,6 +9,7 @@ NS_ASSUME_NONNULL_BEGIN
 @class WPAccount;
 @class WordPressComRestApi;
 @class WordPressOrgXMLRPCApi;
+@class Role;
 
 extern NSString * const BlogEntityName;
 extern NSString * const PostFormatStandard;
@@ -34,6 +35,10 @@ typedef NS_ENUM(NSUInteger, BlogFeature) {
     BlogFeaturePushNotifications,
     /// Does the blog support theme browsing?
     BlogFeatureThemeBrowsing,
+    /// Does the blog support custom themes?
+    BlogFeatureCustomThemes,
+    /// Does the blog support premium themes?
+    BlogFeaturePremiumThemes,
     /// Does the blog support Menus management?
     BlogFeatureMenus,
     /// Does the blog support private visibility?
@@ -46,8 +51,18 @@ typedef NS_ENUM(NSUInteger, BlogFeature) {
     BlogFeatureSiteManagement,
     /// Does the blog support different paid plans?
     BlogFeaturePlans,
+    /// Does the blog support plugins?
+    BlogFeaturePluginManagement,
+    /// Does the blog support Jetpack settings
+    BlogFeatureJetpackSettings,
     /// Does the blog support custom domains?
-    BlogFeatureDomains
+    BlogFeatureDomains,
+    /// Does the blog support frame-nonce to authenticate previews?
+    BlogFeatureNoncePreviews,
+    /// Does the blog support editing media metadata?
+    BlogFeatureMediaMetadataEditing,
+    /// Does the blog support deleting media?
+    BlogFeatureMediaDeletion
 };
 
 typedef NS_ENUM(NSInteger, SiteVisibility) {
@@ -75,6 +90,7 @@ typedef NS_ENUM(NSInteger, SiteVisibility) {
 @property (nonatomic, strong, readwrite, nullable) NSSet *media;
 @property (nonatomic, strong, readwrite, nullable) NSOrderedSet *menus;
 @property (nonatomic, strong, readwrite, nullable) NSOrderedSet *menuLocations;
+@property (nonatomic, strong, readwrite, nullable) NSSet<Role *> *roles;
 @property (nonatomic, strong, readwrite, nullable) NSString *currentThemeId;
 @property (nonatomic, assign, readwrite) BOOL isSyncingPosts;
 @property (nonatomic, assign, readwrite) BOOL isSyncingPages;
@@ -90,7 +106,6 @@ typedef NS_ENUM(NSInteger, SiteVisibility) {
 @property (nonatomic, strong, readwrite, nullable) NSSet *postTypes;
 @property (nonatomic, strong, readwrite, nullable) NSDictionary *postFormats;
 @property (nonatomic, strong, readwrite, nullable) WPAccount *account;
-@property (nonatomic, strong, readwrite, nullable) WPAccount *jetpackAccount;
 @property (nonatomic, strong, readwrite, nullable) WPAccount *accountForDefaultBlog;
 @property (nonatomic, assign, readwrite) BOOL videoPressEnabled;
 @property (nonatomic, assign, readwrite) BOOL isMultiAuthor;
@@ -99,8 +114,11 @@ typedef NS_ENUM(NSInteger, SiteVisibility) {
 @property (nonatomic, assign, readwrite) SiteVisibility siteVisibility;
 @property (nonatomic, strong, readwrite, nullable) NSNumber *planID;
 @property (nonatomic, strong, readwrite, nullable) NSString *planTitle;
+@property (nonatomic, assign, readwrite) BOOL hasPaidPlan;
 @property (nonatomic, strong, readwrite, nullable) NSSet *sharingButtons;
 @property (nonatomic, strong, readwrite, nullable) NSDictionary *capabilities;
+/// The blog's user ID for the current user
+@property (nonatomic, strong, readwrite, nullable) NSNumber *userID;
 
 
 /**
@@ -126,6 +144,8 @@ typedef NS_ENUM(NSInteger, SiteVisibility) {
 // Readonly Properties
 @property (nonatomic,   weak,  readonly, nullable) NSArray *sortedPostFormatNames;
 @property (nonatomic,   weak,  readonly, nullable) NSArray *sortedPostFormats;
+@property (nonatomic,   weak,  readonly, nullable) NSArray *sortedConnections;
+@property (nonatomic, readonly, nullable) NSArray<Role *> *sortedRoles;
 @property (nonatomic, strong,  readonly, nullable) WordPressOrgXMLRPCApi *xmlrpcApi;
 @property (nonatomic,   weak,  readonly, nullable) NSString       *version;
 @property (nonatomic, strong,  readonly, nullable) NSString       *authToken;
@@ -156,6 +176,8 @@ typedef NS_ENUM(NSInteger, SiteVisibility) {
 @property (weak, readonly, nullable) NSString *hostname;
 
 @property (weak, readonly, nullable) NSString *defaultPostFormatText;
+// Used to check if the blog has an icon set up
+@property (readonly) BOOL hasIcon;
 
 #pragma mark - Blog information
 - (BOOL)isPrivate;
@@ -198,18 +220,6 @@ typedef NS_ENUM(NSInteger, SiteVisibility) {
  @return a WordPressComRestApi object if available
  */
 - (nullable WordPressComRestApi *)wordPressComRestApi;
-
-/**
- Returns the wp.com or Jetpack ID as appropriate
- 
- If the blog is a WordPress.com one or it has Jetpack it will return a site ID,
- otherwise it will return nil
- 
- @warning Nate wrote this and he's a bad
- 
- @return a WordPressComRestApi object if available
- */
-- (nullable NSNumber *)siteID;
 
 @end
 

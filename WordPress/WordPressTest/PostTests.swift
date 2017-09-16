@@ -5,22 +5,22 @@ import XCTest
 
 class PostTests: XCTestCase {
 
-    private var contextManager: TestContextManager!
-    private var context: NSManagedObjectContext!
+    fileprivate var contextManager: TestContextManager!
+    fileprivate var context: NSManagedObjectContext!
 
-    private func newTestBlog() -> Blog {
-        return NSEntityDescription.insertNewObjectForEntityForName("Blog", inManagedObjectContext: context) as! Blog
+    fileprivate func newTestBlog() -> Blog {
+        return NSEntityDescription.insertNewObject(forEntityName: "Blog", into: context) as! Blog
     }
 
-    private func newTestPost() -> Post {
-        return NSEntityDescription.insertNewObjectForEntityForName(Post.entityName, inManagedObjectContext: context) as! Post
+    fileprivate func newTestPost() -> Post {
+        return NSEntityDescription.insertNewObject(forEntityName: Post.entityName, into: context) as! Post
     }
 
-    private func newTestPostCategory() -> PostCategory {
-        return NSEntityDescription.insertNewObjectForEntityForName("Category", inManagedObjectContext: context) as! PostCategory
+    fileprivate func newTestPostCategory() -> PostCategory {
+        return NSEntityDescription.insertNewObject(forEntityName: "Category", into: context) as! PostCategory
     }
 
-    private func newTestPostCategory(name: String) -> PostCategory {
+    fileprivate func newTestPostCategory(_ name: String) -> PostCategory {
         let category = newTestPostCategory()
         category.categoryName = name
 
@@ -30,8 +30,8 @@ class PostTests: XCTestCase {
     override func setUp() {
         super.setUp()
         contextManager = TestContextManager()
-        context = NSManagedObjectContext(concurrencyType: .MainQueueConcurrencyType)
-        context.parentContext = contextManager.mainContext
+        context = NSManagedObjectContext(concurrencyType: .mainQueueConcurrencyType)
+        context.parent = contextManager.mainContext
     }
 
     override func tearDown() {
@@ -260,64 +260,142 @@ class PostTests: XCTestCase {
     func testThatStatusForDisplayWorksForOriginalPost() {
         let post = newTestPost()
 
-        post.status = PostStatusDraft
+        post.status = .draft
         XCTAssertNil(post.statusForDisplay())
 
-        post.status = PostStatusPending
-        XCTAssertEqual(post.statusForDisplay(), Post.titleForStatus(PostStatusPending))
+        post.status = .pending
+        XCTAssertEqual(post.statusForDisplay(), Post.title(for: .pending))
 
-        post.status = PostStatusPrivate
-        XCTAssertEqual(post.statusForDisplay(), Post.titleForStatus(PostStatusPrivate))
+        post.status = .publishPrivate
+        XCTAssertEqual(post.statusForDisplay(), Post.title(for: .publishPrivate))
 
-        post.status = PostStatusPublish
+        post.status = .publish
         XCTAssertNil(post.statusForDisplay())
 
-        post.status = PostStatusScheduled
-        XCTAssertEqual(post.statusForDisplay(), Post.titleForStatus(PostStatusScheduled))
+        post.status = .scheduled
+        XCTAssertEqual(post.statusForDisplay(), Post.title(for: .scheduled))
 
-        post.status = PostStatusTrash
-        XCTAssertEqual(post.statusForDisplay(), Post.titleForStatus(PostStatusTrash))
+        post.status = .trash
+        XCTAssertEqual(post.statusForDisplay(), Post.title(for: .trash))
 
-        post.status = PostStatusDeleted
-        XCTAssertEqual(post.statusForDisplay(), Post.titleForStatus(PostStatusDeleted))
+        post.status = .deleted
+        XCTAssertEqual(post.statusForDisplay(), Post.title(for: .deleted))
     }
 
     func testThatStatusForDisplayWorksForRevisionPost() {
         let original = newTestPost()
         let revision = original.createRevision()
 
-        revision.status = PostStatusDraft
+        revision.status = .draft
         XCTAssertEqual(revision.statusForDisplay(), "Local")
 
-        revision.status = PostStatusPending
-        XCTAssertEqual(revision.statusForDisplay(), "\(Post.titleForStatus(PostStatusPending)), Local")
+        revision.status = .pending
+        XCTAssertEqual(revision.statusForDisplay(), "\(Post.title(for: .pending)), Local")
 
-        revision.status = PostStatusPrivate
-        XCTAssertEqual(revision.statusForDisplay(), "\(Post.titleForStatus(PostStatusPrivate)), Local")
+        revision.status = .publishPrivate
+        XCTAssertEqual(revision.statusForDisplay(), "\(Post.title(for: .publishPrivate)), Local")
 
-        revision.status = PostStatusPublish
+        revision.status = .publish
         XCTAssertEqual(revision.statusForDisplay(), "Local")
 
-        revision.status = PostStatusScheduled
-        XCTAssertEqual(revision.statusForDisplay(), "\(Post.titleForStatus(PostStatusScheduled)), Local")
+        revision.status = .scheduled
+        XCTAssertEqual(revision.statusForDisplay(), "\(Post.title(for: .scheduled)), Local")
 
-        revision.status = PostStatusTrash
-        XCTAssertEqual(revision.statusForDisplay(), "\(Post.titleForStatus(PostStatusTrash)), Local")
+        revision.status = .trash
+        XCTAssertEqual(revision.statusForDisplay(), "\(Post.title(for: .trash)), Local")
 
-        revision.status = PostStatusDeleted
-        XCTAssertEqual(revision.statusForDisplay(), "\(Post.titleForStatus(PostStatusDeleted)), Local")
+        revision.status = .deleted
+        XCTAssertEqual(revision.statusForDisplay(), "\(Post.title(for: .deleted)), Local")
     }
 
     func testThatHasLocalChangesWorks() {
         let original = newTestPost()
-        let revision = original.createRevision() as! Post
+        var revision = original.createRevision() as! Post
 
         XCTAssertFalse(original.hasLocalChanges())
+        XCTAssertFalse(revision.hasLocalChanges())
+
+        revision.tags = "Ahoi"
+        XCTAssertTrue(revision.hasLocalChanges())
+
+        original.deleteRevision()
+        original.tags = "ioha"
+        revision = original.createRevision() as! Post
+
+        XCTAssertFalse(revision.hasLocalChanges())
 
         revision.tags = "Ahoi"
         XCTAssertTrue(revision.hasLocalChanges())
 
         revision.tags = original.tags
         XCTAssertFalse(revision.hasLocalChanges())
+
+        revision.publicizeMessage = ""
+        XCTAssertFalse(revision.hasLocalChanges())
+
+        revision.publicizeMessage = nil
+        XCTAssertFalse(revision.hasLocalChanges())
+
+        revision.publicizeMessage = "Make it notorious"
+        XCTAssertTrue(revision.hasLocalChanges())
+
+        revision.publicizeMessage = original.publicizeMessage
+        XCTAssertFalse(revision.hasLocalChanges())
+
+        original.deleteRevision()
+        original.disablePublicizeConnectionWithKeyringID(8888)
+        revision = original.createRevision() as! Post
+
+        XCTAssertFalse(revision.hasLocalChanges())
+
+        revision.disablePublicizeConnectionWithKeyringID(1234)
+        XCTAssertTrue(revision.hasLocalChanges())
+
+        revision.enablePublicizeConnectionWithKeyringID(1234)
+        XCTAssertFalse(revision.hasLocalChanges())
+
+        revision.enablePublicizeConnectionWithKeyringID(8888)
+        XCTAssertTrue(revision.hasLocalChanges())
+
+        revision.disablePublicizeConnectionWithKeyringID(8888)
+        XCTAssertFalse(revision.hasLocalChanges())
+
+        revision.mt_excerpt = "Say cheese"
+        XCTAssertTrue(revision.hasLocalChanges())
+
+        revision.mt_excerpt = original.mt_excerpt
+        XCTAssertFalse(revision.hasLocalChanges())
+
+        revision.wp_slug = "New pretty slug"
+        XCTAssertTrue(revision.hasLocalChanges())
+
+        revision.wp_slug = original.wp_slug
+        XCTAssertFalse(revision.hasLocalChanges())
+    }
+
+    func testThatEnablingDisablingPublicizeConnectionsWorks() {
+        let post = newTestPost()
+
+        post.disablePublicizeConnectionWithKeyringID(1234)
+        XCTAssertTrue(post.publicizeConnectionDisabledForKeyringID(1234))
+
+        post.enablePublicizeConnectionWithKeyringID(1234)
+        XCTAssertFalse(post.publicizeConnectionDisabledForKeyringID(1234))
+    }
+
+    func testThatCanEditPublicizeSettingsWorks() {
+        let post = newTestPost()
+
+        post.status = .publish
+        XCTAssertTrue(post.canEditPublicizeSettings())
+
+        post.postID = 2905
+        XCTAssertFalse(post.canEditPublicizeSettings())
+
+        post.status = .scheduled
+        XCTAssertTrue(post.canEditPublicizeSettings())
+
+        post.status = .draft
+        XCTAssertTrue(post.canEditPublicizeSettings())
     }
 }

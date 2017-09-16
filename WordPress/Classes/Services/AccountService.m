@@ -2,13 +2,11 @@
 #import "WPAccount.h"
 #import "ContextManager.h"
 #import "Blog.h"
-#import "WPAnalyticsTrackerMixpanel.h"
 #import "BlogService.h"
 #import "TodayExtensionService.h"
-#import "AccountServiceRemoteREST.h"
 
-#import "NSString+Helpers.h"
-#import "NSString+XMLExtensions.h"
+@import WordPressKit;
+@import WordPressShared;
 #import "WordPress-Swift.h"
 
 static NSString * const DefaultDotcomAccountUUIDDefaultsKey = @"AccountDefaultDotcomUUID";
@@ -127,6 +125,28 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
     [[NSNotificationCenter defaultCenter] postNotificationName:WPAccountDefaultWordPressComAccountChangedNotification object:nil];
 }
 
+- (BOOL)isDefaultWordPressComAccount:(WPAccount *)account {
+    NSString *uuid = [[NSUserDefaults standardUserDefaults] stringForKey:DefaultDotcomAccountUUIDDefaultsKey];
+    if (uuid.length == 0) {
+        return false;
+    }
+    return [account.uuid isEqualToString:uuid];
+}
+
+- (void)isPasswordlessAccount:(NSString *)identifier success:(void (^)(BOOL passwordless))success failure:(void (^)(NSError *error))failure
+{
+    id<AccountServiceRemote> remote = [self remoteForAnonymous];
+    [remote isPasswordlessAccount:identifier success:^(BOOL passwordless) {
+        if (success) {
+            success(passwordless);
+        }
+    } failure:^(NSError * _Nonnull error) {
+        if (failure) {
+            failure(error);
+        }
+    }];
+}
+
 - (void)isEmailAvailable:(NSString *)email success:(void (^)(BOOL available))success failure:(void (^)(NSError *error))failure
 {
     id<AccountServiceRemote> remote = [self remoteForAnonymous];
@@ -141,19 +161,39 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
     }];
 }
 
-
-- (void)requestAuthenticationLink:(NSString *)email success:(void (^)())success failure:(void (^)(NSError *error))failure
+- (void)isUsernameAvailable:(NSString *)username
+                    success:(void (^)(BOOL available))success
+                    failure:(void (^)(NSError *error))failure
 {
     id<AccountServiceRemote> remote = [self remoteForAnonymous];
-    [remote requestWPComAuthLinkForEmail:email success:^{
+    [remote isUsernameAvailable:username success:^(BOOL available) {
         if (success) {
-            success();
+            success(available);
         }
     } failure:^(NSError *error) {
         if (failure) {
             failure(error);
         }
     }];
+}
+
+
+- (void)requestAuthenticationLink:(NSString *)email success:(void (^)())success failure:(void (^)(NSError *error))failure
+{
+    id<AccountServiceRemote> remote = [self remoteForAnonymous];
+    [remote requestWPComAuthLinkForEmail:email
+                                clientID:ApiCredentials.client
+                            clientSecret:ApiCredentials.secret
+                             wpcomScheme:WPComScheme
+                                 success:^{
+                                     if (success) {
+                                         success();
+                                     }
+                                 } failure:^(NSError *error) {
+                                     if (failure) {
+                                         failure(error);
+                                     }
+                                 }];
 }
 
 
@@ -234,7 +274,7 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
 
     NSString *username = account.username;
     id<AccountServiceRemote> remote = [self remoteForAccount:account];
-    [remote getDetailsForAccount:account success:^(RemoteUser *remoteUser) {
+    [remote getAccountDetailsWithSuccess:^(RemoteUser *remoteUser) {
         // account.objectID can be temporary, so fetch via username/xmlrpc instead.
         WPAccount *fetchedAccount = [self findAccountWithUsername:username];
         [self updateAccount:fetchedAccount withUserDetails:remoteUser];
@@ -255,7 +295,7 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
 
 - (id<AccountServiceRemote>)remoteForAnonymous
 {
-    return [[AccountServiceRemoteREST alloc] initWithWordPressComRestApi:[AccountServiceRemoteREST anonymousWordPressComRestApi]];
+    return [[AccountServiceRemoteREST alloc] initWithWordPressComRestApi:[AccountServiceRemoteREST anonymousWordPressComRestApiWithUserAgent:WPUserAgent.wordPressUserAgent]];
 }
 
 - (id<AccountServiceRemote>)remoteForAccount:(WPAccount *)account
@@ -275,6 +315,7 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
     account.avatarURL = userDetails.avatarURL;
     account.displayName = userDetails.displayName;
     account.dateCreated = userDetails.dateCreated;
+    account.emailVerified = @(userDetails.emailVerified);
     if (userDetails.primaryBlogID) {
         [self configurePrimaryBlogWithID:userDetails.primaryBlogID account:account];
     }
@@ -298,11 +339,6 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
     
     // Setup the Account
     account.defaultBlog = defaultBlog;
-    
-    // DefaultBlog should be flagged as Last Used
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
-    BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-    [blogService flagBlogAsLastUsed:account.defaultBlog];
 }
 
 - (void)setupAppExtensionsWithDefaultAccount
@@ -341,13 +377,13 @@ NSString * const WPAccountEmailAndDefaultBlogUpdatedNotification = @"WPAccountEm
     
 }
 
-- (void)purgeAccount:(WPAccount *)account
+- (void)purgeAccountIfUnused:(WPAccount *)account
 {
     NSParameterAssert(account);
 
     BOOL purge = NO;
     WPAccount *defaultAccount = [self defaultWordPressComAccount];
-    if ([account.jetpackBlogs count] == 0
+    if ([account.blogs count] == 0
         && ![defaultAccount isEqual:account]) {
         purge = YES;
     }

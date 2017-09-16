@@ -1,11 +1,18 @@
 import Foundation
 import UIKit
+import Gridicons
 import WordPressShared
-import WordPressComAnalytics
+import SVProgressHUD
 
 class AppSettingsViewController: UITableViewController {
+    enum Sections: Int {
+        case media
+        case editor
+        case other
+    }
 
-    private var handler: ImmuTableViewHandler!
+    fileprivate var handler: ImmuTableViewHandler!
+
     // MARK: - Initialization
 
     override init(style: UITableViewStyle) {
@@ -18,33 +25,52 @@ class AppSettingsViewController: UITableViewController {
     }
 
     required convenience init() {
-        self.init(style: .Grouped)
+        self.init(style: .grouped)
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        tableView.register(AppSettingsEditorFooterView.self,
+                           forHeaderFooterViewReuseIdentifier: AppSettingsEditorFooterView.reuseIdentifier)
+
         ImmuTable.registerRows([
-            MediaSizeRow.self,
+            DestructiveButtonRow.self,
+            TextRow.self,
+            ImageSizingRow.self,
             SwitchRow.self,
             NavigationItemRow.self
             ], tableView: self.tableView)
 
         handler = ImmuTableViewHandler(takeOver: self)
-        handler.viewModel = tableViewModel()
+        reloadViewModel()
 
-        WPStyleGuide.configureColorsForView(view, andTableView: tableView)
+        WPStyleGuide.configureColors(for: view, andTableView: tableView)
+        WPStyleGuide.configureAutomaticHeightRows(for: tableView)
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        updateMediaCacheSize()
+    }
 
     // MARK: - Model mapping
 
+    fileprivate func reloadViewModel() {
+        handler.viewModel = tableViewModel()
+    }
+
     func tableViewModel() -> ImmuTable {
         let mediaHeader = NSLocalizedString("Media", comment: "Title label for the media settings section in the app settings")
-        let uploadSize = MediaSizeRow(
+        let imageSizingRow = ImageSizingRow(
             title: NSLocalizedString("Max Image Upload Size", comment: "Title for the image size settings option."),
             value: Int(MediaSettings().maxImageSizeSetting),
-            onChange: mediaSizeChanged())
+            onChange: imageSizeChanged())
+
+        let videoSizingRow = NavigationItemRow(
+            title: NSLocalizedString("Max Video Upload Size", comment: "Title for the video size settings option."),
+            detail: MediaSettings().maxVideoSizeSetting.description,
+            action: pushVideoResolutionSettings())
 
         let mediaRemoveLocation = SwitchRow(
             title: NSLocalizedString("Remove Location From Media", comment: "Option to enable the removal of location information/gps from photos and videos"),
@@ -52,26 +78,51 @@ class AppSettingsViewController: UITableViewController {
             onChange: mediaRemoveLocationChanged()
         )
 
+        let mediaCacheRow = TextRow(title: NSLocalizedString("Media Cache Size", comment: "Label for size of media cache in the app."),
+                                    value: mediaCacheRowDescription)
+
+        let mediaClearCacheRow = DestructiveButtonRow(
+            title: NSLocalizedString("Clear Media Cache", comment: "Label for button that clears all media cache."),
+            action: { [weak self] row in
+                self?.clearMediaCache()
+            },
+            accessibilityIdentifier: "mediaClearCacheButton")
+
         let editorSettings = EditorSettings()
         let editorHeader = NSLocalizedString("Editor", comment: "Title label for the editor settings section in the app settings")
         var editorRows = [ImmuTableRow]()
-        let visualEditor = SwitchRow(
-            title: NSLocalizedString("Visual Editor", comment: "Option to enable the visual editor"),
-            value: editorSettings.visualEditorEnabled,
-            onChange: visualEditorChanged()
+
+        let editor = editorSettings.editor
+
+        let textEditor = CheckmarkRow(
+            title: NSLocalizedString("Plain Text", comment: "Option to enable the plain text (legacy) editor"),
+            checked: (editor == .legacy),
+            action: visualEditorChanged(editor: .legacy)
+        )
+        editorRows.append(textEditor)
+
+        let visualEditor = CheckmarkRow(
+            title: NSLocalizedString("Visual", comment: "Option to enable the hybrid visual editor"),
+            checked: (editor == .hybrid),
+            action: visualEditorChanged(editor: .hybrid)
         )
         editorRows.append(visualEditor)
 
-        if FeatureFlag.NativeEditor.enabled && editorSettings.visualEditorEnabled {
-            let nativeEditor = SwitchRow(
-                title: NSLocalizedString("Native Editor", comment: "Option to enable the native visual editor"),
-                value: editorSettings.nativeEditorEnabled,
-                onChange: nativeEditorChanged()
-            )
-            editorRows.append(nativeEditor)
-        }
+        let nativeEditor = CheckmarkRow(
+            title: NSLocalizedString("Visual 2.0", comment: "Option to enable the beta native editor (Aztec)"),
+            checked: (editor == .aztec),
+            action: visualEditorChanged(editor: .aztec)
+        )
+        editorRows.append(nativeEditor)
 
-        let aboutHeader = NSLocalizedString("Other", comment: "Link to About section (contains info about the app)")
+        let usageTrackingHeader = NSLocalizedString("Usage Statistics", comment: "App usage data settings section header")
+        let usageTrackingRow = SwitchRow(
+            title: NSLocalizedString("Send Statistics", comment: "Label for switch to turn on/off sending app usage data"),
+            value: WPAppAnalytics.isTrackingUsage(),
+            onChange: usageTrackingChanged())
+        let usageTrackingFooter = NSLocalizedString("Automatically send usage statistics to help us improve WordPress for iOS", comment: "App usage data settings section footer describing what the setting does.")
+
+        let otherHeader = NSLocalizedString("Other", comment: "Link to About section (contains info about the app)")
         let settingsRow = NavigationItemRow(
             title: NSLocalizedString("Open Device Settings", comment: "Opens iOS's Device Settings for WordPress App"),
             action: openApplicationSettings()
@@ -86,8 +137,11 @@ class AppSettingsViewController: UITableViewController {
             ImmuTableSection(
                 headerText: mediaHeader,
                 rows: [
-                    uploadSize,
-                    mediaRemoveLocation
+                    imageSizingRow,
+                    videoSizingRow,
+                    mediaRemoveLocation,
+                    mediaCacheRow,
+                    mediaClearCacheRow
                 ],
                 footerText: nil),
             ImmuTableSection(
@@ -95,7 +149,12 @@ class AppSettingsViewController: UITableViewController {
                 rows: editorRows,
                 footerText: nil),
             ImmuTableSection(
-                headerText: aboutHeader,
+                headerText: usageTrackingHeader,
+                rows: [usageTrackingRow],
+                footerText: usageTrackingFooter
+            ),
+            ImmuTableSection(
+                headerText: otherHeader,
                 rows: [
                     settingsRow,
                     aboutRow
@@ -104,56 +163,281 @@ class AppSettingsViewController: UITableViewController {
             ])
     }
 
+    // MARK: - UITableViewDelegate
+
+    override func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
+        if shouldShowEditorFooterForSection(section) {
+            let view = tableView.dequeueReusableHeaderFooterView(withIdentifier: AppSettingsEditorFooterView.reuseIdentifier) as! AppSettingsEditorFooterView
+
+            view.tapBlock = { [weak self] in
+                WPAppAnalytics.track(.editorAztecBetaLink)
+
+                if let controller = self {
+                    WPWebViewController.presentWhatsNewWebView(from: controller)
+                }
+            }
+
+            return view
+        }
+
+        return nil
+    }
+
+    override func tableView(_ tableView: UITableView, heightForFooterInSection section: Int) -> CGFloat {
+        if shouldShowEditorFooterForSection(section) {
+            return AppSettingsEditorFooterView.height
+        }
+
+        return UITableViewAutomaticDimension
+    }
+
+    private func shouldShowEditorFooterForSection(_ section: Int) -> Bool {
+        return section == Sections.editor.rawValue && EditorSettings().editor == .aztec
+    }
+
+    // MARK: - Media cache methods
+
+    fileprivate enum MediaCacheSettingsStatus {
+        case calculatingSize
+        case clearingCache
+        case unknown
+        case empty
+    }
+
+    fileprivate var mediaCacheRowDescription = "" {
+        didSet {
+            reloadViewModel()
+        }
+    }
+
+    fileprivate func setMediaCacheRowDescription(allocatedSize: Int64?) {
+        guard let allocatedSize = allocatedSize else {
+            setMediaCacheRowDescription(status: .unknown)
+            return
+        }
+        if allocatedSize == 0 {
+            setMediaCacheRowDescription(status: .empty)
+            return
+        }
+        mediaCacheRowDescription = ByteCountFormatter.string(fromByteCount: allocatedSize, countStyle: ByteCountFormatter.CountStyle.file)
+    }
+
+    fileprivate func setMediaCacheRowDescription(status: MediaCacheSettingsStatus) {
+        switch status {
+        case .clearingCache:
+            mediaCacheRowDescription = NSLocalizedString("Clearing...", comment: "Label for size of media while it's being cleared.")
+        case .calculatingSize:
+            mediaCacheRowDescription = NSLocalizedString("Calculating...", comment: "Label for size of media while it's being calculated.")
+        case .unknown:
+            mediaCacheRowDescription = NSLocalizedString("Unknown", comment: "Label for size of media when it's not possible to calculate it.")
+        case .empty:
+            mediaCacheRowDescription = NSLocalizedString("Empty", comment: "Label for size of media when the cache is empty.")
+        }
+    }
+
+    fileprivate func updateMediaCacheSize() {
+        setMediaCacheRowDescription(status: .calculatingSize)
+        MediaFileManager.calculateSizeOfMediaCacheDirectory { [weak self] (allocatedSize) in
+            self?.setMediaCacheRowDescription(allocatedSize: allocatedSize)
+        }
+    }
+
+    fileprivate func clearMediaCache() {
+        setMediaCacheRowDescription(status: .clearingCache)
+        MediaFileManager.clearAllMediaCacheFiles(onCompletion: { [weak self] in
+            self?.updateMediaCacheSize()
+            }, onError: { [weak self] (error) in
+                self?.updateMediaCacheSize()
+        })
+    }
 
     // MARK: - Actions
 
-    func mediaSizeChanged() -> Int -> Void {
+    func imageSizeChanged() -> (Int) -> Void {
         return { value in
             MediaSettings().maxImageSizeSetting = value
             ShareExtensionService.configureShareExtensionMaximumMediaDimension(value)
+
+            var properties = [String: AnyObject]()
+            properties["enabled"] = (value != Int.max) as AnyObject
+            properties["value"] = value as Int as AnyObject
+            WPAnalytics.track(.appSettingsImageOptimizationChanged, withProperties: properties)
         }
     }
 
-    func mediaRemoveLocationChanged() -> Bool -> Void {
+    func pushVideoResolutionSettings() -> ImmuTableAction {
+        return { [weak self] row in
+            let values = [MediaSettings.VideoResolution.size640x480,
+                          MediaSettings.VideoResolution.size1280x720,
+                          MediaSettings.VideoResolution.size1920x1080,
+                          MediaSettings.VideoResolution.size3840x2160,
+                          MediaSettings.VideoResolution.sizeOriginal]
+
+            let titles = values.map({ (settings: MediaSettings.VideoResolution) -> String in
+                settings.description
+            })
+
+            let currentVideoResolution = MediaSettings().maxVideoSizeSetting
+
+            let settingsSelectionConfiguration = [SettingsSelectionDefaultValueKey: currentVideoResolution,
+                                                  SettingsSelectionTitleKey: NSLocalizedString("Resolution", comment: "The largest resolution allowed for uploading"),
+                                                  SettingsSelectionTitlesKey: titles,
+                                                  SettingsSelectionValuesKey: values] as [String : Any]
+
+            let viewController = SettingsSelectionViewController(dictionary: settingsSelectionConfiguration)
+
+            viewController?.onItemSelected = { (resolution: Any!) -> () in
+                let newResolution = resolution as! MediaSettings.VideoResolution
+                MediaSettings().maxVideoSizeSetting = newResolution
+
+                var properties = [String: AnyObject]()
+                properties["enabled"] = (newResolution != MediaSettings.VideoResolution.sizeOriginal) as AnyObject
+                properties["value"] = newResolution.description as AnyObject
+                WPAnalytics.track(.appSettingsVideoOptimizationChanged, withProperties: properties)
+            }
+
+            self?.navigationController?.pushViewController(viewController!, animated: true)
+        }
+    }
+
+    func mediaRemoveLocationChanged() -> (Bool) -> Void {
         return { value in
             MediaSettings().removeLocationSetting = value
+            WPAnalytics.track(.appSettingsMediaRemoveLocationChanged, withProperties: ["enabled": value as AnyObject])
         }
     }
 
-    func visualEditorChanged() -> Bool -> Void {
-        return { enabled in
-            if enabled {
-                WPAnalytics.track(.EditorToggledOn)
-            } else {
-                WPAnalytics.track(.EditorToggledOff)
+    func visualEditorChanged(editor: EditorSettings.Editor) -> ImmuTableAction {
+        return { [weak self] row in
+            let currentEditorIsAztec = EditorSettings().nativeEditorEnabled
+
+            switch editor {
+            case .legacy:
+                EditorSettings().nativeEditorEnabled = false
+                EditorSettings().visualEditorEnabled = false
+                if currentEditorIsAztec {
+                    WPAnalytics.track(.editorToggledOff)
+                }
+            case .hybrid:
+                EditorSettings().nativeEditorEnabled = false
+                EditorSettings().visualEditorEnabled = true
+                if currentEditorIsAztec {
+                    WPAnalytics.track(.editorToggledOff)
+                }
+            case .aztec:
+                EditorSettings().visualEditorEnabled = true
+                EditorSettings().nativeEditorEnabled = true
+                if !currentEditorIsAztec {
+                    WPAnalytics.track(.editorToggledOn)
+                }
             }
-            EditorSettings().visualEditorEnabled = enabled
-            self.handler.viewModel = self.tableViewModel()
+
+            self?.reloadViewModel()
         }
     }
 
-    func nativeEditorChanged() -> Bool -> Void {
+    func nativeEditorChanged() -> (Bool) -> Void {
         return { enabled in
             EditorSettings().nativeEditorEnabled = enabled
         }
     }
 
+    func usageTrackingChanged() -> (Bool) -> Void {
+        return { enabled in
+            let appAnalytics = WordPressAppDelegate.sharedInstance().analytics
+            appAnalytics?.setTrackingUsage(enabled)
+        }
+    }
+
     func pushAbout() -> ImmuTableAction {
-        return { [unowned self] row in
+        return { [weak self] row in
             let controller = AboutViewController()
-            self.navigationController?.pushViewController(controller, animated: true)
+            self?.navigationController?.pushViewController(controller, animated: true)
         }
     }
 
     func openApplicationSettings() -> ImmuTableAction {
-        return { row in
-            if let targetURL = NSURL(string: UIApplicationOpenSettingsURLString) {
-                UIApplication.sharedApplication().openURL(targetURL)
+        return { [weak self] row in
+            if let targetURL = URL(string: UIApplicationOpenSettingsURLString) {
+                UIApplication.shared.open(targetURL)
+
             } else {
                 assertionFailure("Couldn't unwrap Settings URL")
             }
 
-            self.tableView.deselectSelectedRowWithAnimation(true)
+            self?.tableView.deselectSelectedRowWithAnimation(true)
         }
+    }
+}
+
+fileprivate struct ImageSizingRow: ImmuTableRow {
+    typealias CellType = MediaSizeSliderCell
+
+    static let cell: ImmuTableCell = {
+        let nib = UINib(nibName: "MediaSizeSliderCell", bundle: Bundle(for: CellType.self))
+        return ImmuTableCell.nib(nib, CellType.self)
+    }()
+    static let customHeight: Float? = CellType.height
+
+    let title: String
+    let value: Int
+    let onChange: (Int) -> Void
+
+    let action: ImmuTableAction? = nil
+
+    func configureCell(_ cell: UITableViewCell) {
+        let cell = cell as! CellType
+
+        cell.title = title
+        cell.value = value
+        cell.onChange = onChange
+        cell.selectionStyle = .none
+
+        (cell.minValue, cell.maxValue) = MediaSettings().allowedImageSizeRange
+    }
+}
+
+fileprivate class AppSettingsEditorFooterView: UITableViewHeaderFooterView {
+    static let height: CGFloat = 38.0
+    static let reuseIdentifier = "AppSettingsEditorFooterView"
+    var tapBlock: (() -> Void)? = nil
+
+    override init(reuseIdentifier: String?) {
+        super.init(reuseIdentifier: reuseIdentifier)
+
+        let stackView = UIStackView()
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.alignment = .fill
+        stackView.distribution = .equalSpacing
+        stackView.axis = .horizontal
+
+        let label = UILabel()
+        label.font = UIFont.preferredFont(forTextStyle: .footnote)
+        label.text = NSLocalizedString("Editor release notes & bug reporting", comment: "Label for button linking to release notes and bug reporting help for the new beta Aztec editor")
+        label.textColor = WPStyleGuide.greyDarken10()
+        stackView.addArrangedSubview(label)
+
+        let button = UIButton(type: .custom)
+        button.setImage(Gridicon.iconOfType(.infoOutline), for: .normal)
+        button.tintColor = WPStyleGuide.greyDarken10()
+        button.addTarget(self, action: #selector(footerButtonTapped), for: .touchUpInside)
+
+        contentView.addSubview(stackView)
+        stackView.addArrangedSubview(button)
+
+        NSLayoutConstraint.activate([
+            stackView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            stackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            stackView.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor)
+            ])
+    }
+
+    required init?(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @IBAction private func footerButtonTapped() {
+        tapBlock?()
     }
 }

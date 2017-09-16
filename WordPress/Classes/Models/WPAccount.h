@@ -18,8 +18,8 @@
 @property (nonatomic, strong)   NSDate      *dateCreated;
 @property (nonatomic, strong)   NSString    *email;
 @property (nonatomic, strong)   NSString    *displayName;
+@property (nonatomic, strong)   NSNumber    *emailVerified;
 @property (nonatomic, strong)   NSSet<Blog *>       *blogs;
-@property (nonatomic, strong)   NSSet<Blog *>       *jetpackBlogs;
 @property (nonatomic, readonly) NSArray<Blog *>     *visibleBlogs;
 @property (nonatomic, strong)   Blog        *defaultBlog;
 @property (nonatomic, strong)   ManagedAccountSettings *managedSettings;
@@ -39,6 +39,11 @@
  */
 @property (nonatomic, readonly) WordPressComRestApi *wordPressComRestApi;
 
+/**
+ A string with the email verification status. Can be "verified", "unverified", or "unknown".
+ */
+- (NSString *)verificationStatus;
+
 @end
 
 @interface WPAccount (CoreDataGeneratedAccessors)
@@ -47,10 +52,5 @@
 - (void)removeBlogsObject:(Blog *)value;
 - (void)addBlogs:(NSSet *)values;
 - (void)removeBlogs:(NSSet *)values;
-
-- (void)addJetpackBlogsObject:(Blog *)value;
-- (void)removeJetpackBlogsObject:(Blog *)value;
-- (void)addJetpackBlogs:(NSSet *)values;
-- (void)removeJetpackBlogs:(NSSet *)values;
 
 @end

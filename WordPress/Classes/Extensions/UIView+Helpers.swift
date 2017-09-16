@@ -1,83 +1,54 @@
 import Foundation
 
 
-extension UIView
-{
-    // MARK: - Public Methods
-    public func pinSubview(subview: UIView, aboveSubview: UIView) {
-        let constraint = NSLayoutConstraint(item: subview, attribute: .Bottom, relatedBy: .Equal, toItem: aboveSubview, attribute: .Top, multiplier: 1, constant: 0)
-        addConstraint(constraint)
-    }
+// MARK: - UIView Helpers
+//
+extension UIView {
 
-    public func pinSubviewAtBottom(subview: UIView) {
+    func pinSubviewAtCenter(_ subview: UIView) {
         let newConstraints = [
-            NSLayoutConstraint(item: self, attribute: .Leading,  relatedBy: .Equal, toItem: subview, attribute: .Leading,  multiplier: 1, constant: 0),
-            NSLayoutConstraint(item: self, attribute: .Trailing, relatedBy: .Equal, toItem: subview, attribute: .Trailing, multiplier: 1, constant: 0),
-            NSLayoutConstraint(item: self, attribute: .Bottom,   relatedBy: .Equal, toItem: subview, attribute: .Bottom,   multiplier: 1, constant: 0),
+            NSLayoutConstraint(item: self, attribute: .centerX,  relatedBy: .equal, toItem: subview, attribute: .centerX,  multiplier: 1, constant: 0),
+            NSLayoutConstraint(item: self, attribute: .centerY,  relatedBy: .equal, toItem: subview, attribute: .centerY,  multiplier: 1, constant: 0)
         ]
 
         addConstraints(newConstraints)
     }
 
-    public func pinSubviewAtCenter(subview: UIView) {
+    func pinSubviewToAllEdges(_ subview: UIView) {
         let newConstraints = [
-            NSLayoutConstraint(item: self, attribute: .CenterX,  relatedBy: .Equal, toItem: subview, attribute: .CenterX,  multiplier: 1, constant: 0),
-            NSLayoutConstraint(item: self, attribute: .CenterY,  relatedBy: .Equal, toItem: subview, attribute: .CenterY,  multiplier: 1, constant: 0)
+            NSLayoutConstraint(item: self, attribute: .leading,  relatedBy: .equal, toItem: subview, attribute: .leading,  multiplier: 1, constant: 0),
+            NSLayoutConstraint(item: self, attribute: .trailing, relatedBy: .equal, toItem: subview, attribute: .trailing, multiplier: 1, constant: 0),
+            NSLayoutConstraint(item: self, attribute: .bottom,   relatedBy: .equal, toItem: subview, attribute: .bottom,   multiplier: 1, constant: 0),
+            NSLayoutConstraint(item: self, attribute: .top,      relatedBy: .equal, toItem: subview, attribute: .top,      multiplier: 1, constant: 0)
         ]
 
         addConstraints(newConstraints)
     }
 
-    public func pinSubviewToAllEdges(subview: UIView) {
-        let newConstraints = [
-            NSLayoutConstraint(item: self, attribute: .Leading,  relatedBy: .Equal, toItem: subview, attribute: .Leading,  multiplier: 1, constant: 0),
-            NSLayoutConstraint(item: self, attribute: .Trailing, relatedBy: .Equal, toItem: subview, attribute: .Trailing, multiplier: 1, constant: 0),
-            NSLayoutConstraint(item: self, attribute: .Bottom,   relatedBy: .Equal, toItem: subview, attribute: .Bottom,   multiplier: 1, constant: 0),
-            NSLayoutConstraint(item: self, attribute: .Top,      relatedBy: .Equal, toItem: subview, attribute: .Top,      multiplier: 1, constant: 0)
-        ]
-
-        addConstraints(newConstraints)
+    func pinSubviewToAllEdgeMargins(_ subview: UIView) {
+        subview.topAnchor.constraint(equalTo: layoutMarginsGuide.topAnchor).isActive = true
+        subview.bottomAnchor.constraint(equalTo: layoutMarginsGuide.bottomAnchor).isActive = true
+        subview.leadingAnchor.constraint(equalTo: layoutMarginsGuide.leadingAnchor).isActive = true
+        subview.trailingAnchor.constraint(equalTo: layoutMarginsGuide.trailingAnchor).isActive = true
     }
 
-    public func pinSubviewToAllEdgeMargins(subview: UIView) {
-        subview.topAnchor.constraintEqualToAnchor(layoutMarginsGuide.topAnchor).active = true
-        subview.bottomAnchor.constraintEqualToAnchor(layoutMarginsGuide.bottomAnchor).active = true
-        subview.leadingAnchor.constraintEqualToAnchor(layoutMarginsGuide.leadingAnchor).active = true
-        subview.trailingAnchor.constraintEqualToAnchor(layoutMarginsGuide.trailingAnchor).active = true
-    }
-
-    public func constraintForAttribute(attribute: NSLayoutAttribute) -> CGFloat? {
-        for constraint in constraints {
-            if constraint.firstItem as! NSObject == self {
-                if constraint.firstAttribute == attribute || constraint.secondAttribute == attribute {
-                    return constraint.constant
-                }
-            }
+    func findFirstResponder() -> UIView? {
+        if isFirstResponder {
+            return self
         }
+
+        for subview in subviews {
+            guard let responder = subview.findFirstResponder() else {
+                continue
+            }
+
+            return responder
+        }
+
         return nil
     }
 
-    public func updateConstraint(attribute: NSLayoutAttribute, constant: CGFloat) {
-        updateConstraintWithFirstItem(self, attribute: attribute, constant: constant)
-    }
-
-    public func updateConstraintWithFirstItem(firstItem: NSObject!, attribute: NSLayoutAttribute, constant: CGFloat) {
-        for constraint in constraints {
-            if constraint.firstItem as! NSObject == firstItem {
-                if constraint.firstAttribute == attribute || constraint.secondAttribute == attribute {
-                    constraint.constant = constant
-                }
-            }
-        }
-    }
-
-    public func updateConstraintWithFirstItem(firstItem: NSObject!, secondItem: NSObject!, firstItemAttribute: NSLayoutAttribute, secondItemAttribute: NSLayoutAttribute, constant: CGFloat) {
-        for constraint in constraints {
-            if (constraint.firstItem as! NSObject == firstItem) && (constraint.secondItem as? NSObject == secondItem) {
-                if constraint.firstAttribute == firstItemAttribute && constraint.secondAttribute == secondItemAttribute {
-                    constraint.constant = constant
-                }
-            }
-        }
+    func userInterfaceLayoutDirection() -> UIUserInterfaceLayoutDirection {
+        return UIView.userInterfaceLayoutDirection(for: semanticContentAttribute)
     }
 }

@@ -8,7 +8,7 @@ extension Int {
     /// - Precondition: divisor must be > 0
     /// - returns: an Int rounded to the nearest integer that's a multiple of the argument.
     ///
-    func round(divisor: UInt) -> Int {
+    func round(_ divisor: UInt) -> Int {
         assert(divisor > 0)
         if self == 0 || divisor == 0 {
             return self
@@ -16,7 +16,7 @@ extension Int {
         let sign = self / abs(self)
         let divisor = Int(divisor)
         let half = divisor / 2
-        return self + sign * (half - (abs(self) + half) % divisor)
+        return self + sign * (half - (abs(self) as Int + half) % divisor)
     }
 }
 

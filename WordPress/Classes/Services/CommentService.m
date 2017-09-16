@@ -2,17 +2,14 @@
 #import "AccountService.h"
 #import "Blog.h"
 #import "Comment.h"
-#import "CommentServiceRemote.h"
-#import "CommentServiceRemoteXMLRPC.h"
-#import "CommentServiceRemoteREST.h"
 #import "ContextManager.h"
-#import "NSString+Helpers.h"
 #import "ReaderPost.h"
 #import "WPAccount.h"
 #import "PostService.h"
 #import "AbstractPost.h"
-#import "NSDate+WordPressJSON.h"
 #import "WordPress-Swift.h"
+
+@import WordPressKit;
 
 NSUInteger const WPTopLevelHierarchicalCommentsPerPage = 20;
 NSInteger const  WPNumberOfCommentsToSync = 100;
@@ -350,13 +347,19 @@ static NSTimeInterval const CommentsRefreshTimeoutInSeconds = 60 * 5; // 5 minut
                                                  if (([parents count] < WPTopLevelHierarchicalCommentsPerPage) || (page > 1 && !includesNewComments)) {
                                                      hasMore = NO;
                                                  }
-                                                 success([comments count], hasMore);
+
+                                                 dispatch_async(dispatch_get_main_queue(), ^{
+                                                     success([comments count], hasMore);
+                                                 });
+
                                              }
                                          }];
                                      } failure:^(NSError *error) {
                                          [self.managedObjectContext performBlock:^{
                                              if (failure) {
-                                                 failure(error);
+                                                 dispatch_async(dispatch_get_main_queue(), ^{
+                                                     failure(error);
+                                                 });
                                              }
                                          }];
                                      }];
@@ -370,6 +373,14 @@ static NSTimeInterval const CommentsRefreshTimeoutInSeconds = 60 * 5; // 5 minut
 }
 
 #pragma mark - REST Helpers
+
+- (NSString *)sanitizeCommentContent:(NSString *)string isPrivateSite:(BOOL)isPrivateSite
+{
+    NSString *content = string;
+    content = [RichContentFormatter removeTrailingBreakTags:content];
+    content = [RichContentFormatter formatContentString:content isPrivateStie:isPrivateSite];
+    return content;
+}
 
 // Edition
 - (void)updateCommentWithID:(NSNumber *)commentID
@@ -386,15 +397,15 @@ static NSTimeInterval const CommentsRefreshTimeoutInSeconds = 60 * 5; // 5 minut
 }
 
 // Replies
-- (void)replyToPostWithID:(NSNumber *)postID
-                   siteID:(NSNumber *)siteID
-                  content:(NSString *)content
-                  success:(void (^)())success
-                  failure:(void (^)(NSError *error))failure
+- (void)replyToPost:(ReaderPost *)post
+            content:(NSString *)content
+            success:(void (^)())success
+            failure:(void (^)(NSError *error))failure
 {
     // Create and optimistically save a comment, based on the current wpcom acct
     // post and content provided.
-    Comment *comment = [self createHierarchicalCommentWithContent:content withParent:nil postID:postID siteID:siteID];
+    Comment *comment = [self createHierarchicalCommentWithContent:content withParent:nil postID:post.postID siteID:post.siteID];
+    BOOL isPrivateSite = post.isPrivate;
     NSManagedObjectID *commentID = comment.objectID;
     void (^successBlock)(RemoteComment *remoteComment) = ^void(RemoteComment *remoteComment) {
         [self.managedObjectContext performBlock:^{
@@ -402,6 +413,9 @@ static NSTimeInterval const CommentsRefreshTimeoutInSeconds = 60 * 5; // 5 minut
             if (!comment) {
                 return;
             }
+
+            remoteComment.content = [self sanitizeCommentContent:remoteComment.content isPrivateSite:isPrivateSite];
+
             // Update and save the comment
             [self updateCommentAndSave:comment withRemoteComment:remoteComment];
             if (success) {
@@ -424,23 +438,23 @@ static NSTimeInterval const CommentsRefreshTimeoutInSeconds = 60 * 5; // 5 minut
         }];
     };
 
-    CommentServiceRemoteREST *remote = [self restRemoteForSite:siteID];
-    [remote replyToPostWithID:postID
+    CommentServiceRemoteREST *remote = [self restRemoteForSite:post.siteID];
+    [remote replyToPostWithID:post.postID
                       content:content
                       success:successBlock
                       failure:failureBlock];
 }
 
 - (void)replyToHierarchicalCommentWithID:(NSNumber *)commentID
-                                  postID:(NSNumber *)postID
-                                  siteID:(NSNumber *)siteID
+                                  post:(ReaderPost *)post
                                  content:(NSString *)content
                                  success:(void (^)())success
                                  failure:(void (^)(NSError *error))failure
 {
     // Create and optimistically save a comment, based on the current wpcom acct
     // post and content provided.
-    Comment *comment = [self createHierarchicalCommentWithContent:content withParent:commentID postID:postID siteID:siteID];
+    Comment *comment = [self createHierarchicalCommentWithContent:content withParent:commentID postID:post.postID siteID:post.siteID];
+    BOOL isPrivateSite = post.isPrivate;
     NSManagedObjectID *commentObjectID = comment.objectID;
     void (^successBlock)(RemoteComment *remoteComment) = ^void(RemoteComment *remoteComment) {
         // Update and save the comment
@@ -449,6 +463,9 @@ static NSTimeInterval const CommentsRefreshTimeoutInSeconds = 60 * 5; // 5 minut
             if (!comment) {
                 return;
             }
+
+            remoteComment.content = [self sanitizeCommentContent:remoteComment.content isPrivateSite:isPrivateSite];
+
             [self updateCommentAndSave:comment withRemoteComment:remoteComment];
             if (success) {
                 success();
@@ -472,7 +489,7 @@ static NSTimeInterval const CommentsRefreshTimeoutInSeconds = 60 * 5; // 5 minut
         }];
     };
 
-    CommentServiceRemoteREST *remote = [self restRemoteForSite:siteID];
+    CommentServiceRemoteREST *remote = [self restRemoteForSite:post.siteID];
     [remote replyToCommentWithID:commentID
                          content:content
                          success:successBlock
@@ -654,7 +671,7 @@ static NSTimeInterval const CommentsRefreshTimeoutInSeconds = 60 * 5; // 5 minut
                         if (success) {
                             success();
                         }
-                    } failure:^(NSError *error) {
+                    } failure:^(NSError *error) {                        
                         [self.managedObjectContext performBlock:^{
                             // Note: The comment might have been deleted at this point
                             Comment *commentInContext = (Comment *)[self.managedObjectContext existingObjectWithID:commentID error:nil];
@@ -864,6 +881,7 @@ static NSTimeInterval const CommentsRefreshTimeoutInSeconds = 60 * 5; // 5 minut
             newCommentCount++;
             comment = [NSEntityDescription insertNewObjectForEntityForName:entityName inManagedObjectContext:self.managedObjectContext];
         }
+
         [self updateComment:comment withRemoteComment:remoteComment];
 
         // Calculate hierarchy and depth.
@@ -871,7 +889,7 @@ static NSTimeInterval const CommentsRefreshTimeoutInSeconds = 60 * 5; // 5 minut
         comment.hierarchy = [self hierarchyFromAncestors:ancestors andCommentID:comment.commentID];
         comment.depth = @([ancestors count]);
         comment.post = post;
-        comment.content = [comment.content stringByReplacingHTMLEmoticonsWithEmoji];
+        comment.content = [self sanitizeCommentContent:comment.content isPrivateSite:post.isPrivate];
         [commentsToKeep addObject:comment];
     }
 
@@ -889,7 +907,7 @@ static NSTimeInterval const CommentsRefreshTimeoutInSeconds = 60 * 5; // 5 minut
         post.commentCount = @([commentsToKeep count]);
     }
 
-    [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
+    [[ContextManager sharedInstance] saveContextAndWait:self.managedObjectContext];
 
     return newCommentCount > 0;
 }

@@ -5,7 +5,7 @@
 #import "SharingDetailViewController.h"
 #import "SharingAuthorizationHelper.h"
 #import "UIImageView+AFNetworkingExtra.h"
-#import "WPTableViewCell.h"
+#import <WordPressShared/WPTableViewCell.h>
 #import "WordPress-Swift.h"
 
 static NSString *const CellIdentifier = @"CellIdentifier";
@@ -80,8 +80,7 @@ static NSString *const CellIdentifier = @"CellIdentifier";
 - (void)showDetailForConnection:(PublicizeConnection *)connection
 {
     SharingDetailViewController *controller = [[SharingDetailViewController alloc] initWithBlog:self.blog
-                                                                            publicizeConnection:connection
-                                                                               publicizeService:self.publicizeService];
+                                                                            publicizeConnection:connection];
     [self.navigationController pushViewController:controller animated:YES];
 }
 
@@ -90,10 +89,16 @@ static NSString *const CellIdentifier = @"CellIdentifier";
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
-    if ([self hasConnectedAccounts]) {
+    if ([self.publicizeService.serviceID isEqualToString:PublicizeService.googlePlusServiceID]) {
+        if ([self hasConnectedAccounts]) {
+            return 1;
+        } else {
+            return 0;
+        }
+    } else if ([self hasConnectedAccounts]) {
         return 2;
     }
-
+    
     return 1;
 }
 

@@ -3,8 +3,7 @@ import Foundation
 
 /// Encapsulates Account-Y Helpers
 ///
-@objc class AccountHelper: NSObject
-{
+@objc class AccountHelper: NSObject {
     /// Threadsafe Helper that indicates whether a Default Dotcom Account is available, or not
     ///
     static func isDotcomAvailable() -> Bool {
@@ -12,7 +11,7 @@ import Foundation
         let service = AccountService(managedObjectContext: context)
         var available = false
 
-        context.performBlockAndWait {
+        context.performAndWait {
             available = service.defaultWordPressComAccount() != nil
         }
 

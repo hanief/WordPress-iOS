@@ -3,33 +3,30 @@ import CoreData
 
 @objc (Page)
 class Page: AbstractPost {
-
-    /// Number of seconds in twenty-four hours.
+    /// Section identifier for the page, using the creation date.
     ///
-    private static let twentyFourHours = NSTimeInterval(86400)
+    func sectionIdentifierWithDateCreated() -> String {
+        let date = date_created_gmt ?? Date()
+        return date.toStringForPageSections()
+    }
 
-    /// The time interval formatter that all pages will use for their section identifiers.
+    /// Section identifier for the page, using the last modification date.
     ///
-    private static let timeIntervalFormatter : TTTTimeIntervalFormatter = {
-        let timeIntervalFormatter = TTTTimeIntervalFormatter()
+    func sectionIdentifierWithDateModified() -> String {
+        let date = dateModified ?? Date()
+        return date.toStringForPageSections()
+    }
 
-        timeIntervalFormatter.leastSignificantUnit = .Day
-        timeIntervalFormatter.usesIdiomaticDeicticExpressions = true
-        timeIntervalFormatter.presentDeicticExpression = NSLocalizedString("today", comment: "Today")
-
-        return timeIntervalFormatter
-    }()
-
-    /// Section identifier for the page.
+    /// Returns the selector string to use as a sectionNameKeyPath, depending on the given keyPath.
     ///
-    func sectionIdentifier() -> String {
-
-        let interval = date_created_gmt?.timeIntervalSinceNow ?? NSTimeInterval(0)
-
-        if interval > 0 && interval < self.dynamicType.twentyFourHours {
-            return NSLocalizedString("later today", comment: "Later today")
-        } else {
-            return self.dynamicType.timeIntervalFormatter.stringForTimeInterval(interval)
+    static func sectionIdentifier(dateKeyPath: String) -> String {
+        switch dateKeyPath {
+        case #keyPath(AbstractPost.date_created_gmt):
+            return NSStringFromSelector(#selector(Page.sectionIdentifierWithDateCreated))
+        case #keyPath(AbstractPost.dateModified):
+            return NSStringFromSelector(#selector(Page.sectionIdentifierWithDateModified))
+        default:
+            preconditionFailure("Invalid key path for a section identifier")
         }
     }
 }

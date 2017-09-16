@@ -1,13 +1,13 @@
 #import "WPAppAnalytics.h"
 
 #import "ContextManager.h"
-#import "WPAnalyticsTrackerMixpanel.h"
 #import "WPAnalyticsTrackerWPCom.h"
 #import "WPAnalyticsTrackerAutomatticTracks.h"
 #import "WPTabBarController.h"
 #import "ApiCredentials.h"
 #import "WordPressAppDelegate.h"
 #import "Blog.h"
+#import "AbstractPost.h"
 
 NSString * const WPAppAnalyticsDefaultsKeyUsageTracking = @"usage_tracking_enabled";
 NSString * const WPAppAnalyticsKeyBlogID = @"blog_id";
@@ -15,6 +15,8 @@ NSString * const WPAppAnalyticsKeyPostID = @"post_id";
 NSString * const WPAppAnalyticsKeyFeedID = @"feed_id";
 NSString * const WPAppAnalyticsKeyFeedItemID = @"feed_item_id";
 NSString * const WPAppAnalyticsKeyIsJetpack = @"is_jetpack";
+NSString * const WPAppAnalyticsKeySessionCount = @"session_count";
+NSString * const WPAppAnalyticsKeyEditorSource = @"editor_source";
 static NSString * const WPAppAnalyticsKeyLastVisibleScreen = @"last_visible_screen";
 static NSString * const WPAppAnalyticsKeyTimeInApp = @"time_in_app";
 
@@ -73,17 +75,23 @@ static NSString * const WPAppAnalyticsKeyTimeInApp = @"time_in_app";
 - (void)initializeAppTracking
 {
     [self initializeUsageTrackingIfNecessary];
-    
-    if ([ApiCredentials mixpanelAPIToken].length > 0) {
-        [WPAnalytics registerTracker:[[WPAnalyticsTrackerMixpanel alloc] initWithManagedObjectContext:[[ContextManager sharedInstance] mainContext]]];
-    }
 
-    [WPAnalytics registerTracker:[[WPAnalyticsTrackerWPCom alloc] init]];
-    [WPAnalytics registerTracker:[WPAnalyticsTrackerAutomatticTracks new]];
-
-    if ([self isTrackingUsage]) {
+    BOOL trackingEnabled = [WPAppAnalytics isTrackingUsage];
+    if (trackingEnabled) {
+        [self registerTrackers];
         [self beginSession];
     }
+}
+
+- (void)registerTrackers
+{
+    [WPAnalytics registerTracker:[WPAnalyticsTrackerWPCom new]];
+    [WPAnalytics registerTracker:[WPAnalyticsTrackerAutomatticTracks new]];
+}
+
+- (void)clearTrackers
+{
+    [WPAnalytics clearTrackers];
 }
 
 #pragma mark - Notifications
@@ -110,12 +118,35 @@ static NSString * const WPAppAnalyticsKeyTimeInApp = @"time_in_app";
 
 - (void)applicationDidBecomeActive:(NSNotification*)notification
 {
+    [self incrementSessionCount];
     [self trackApplicationOpened];
 }
 
 - (void)applicationDidEnterBackground:(NSNotification*)notification
 {
     [self trackApplicationClosed];
+}
+
+#pragma mark - Session
+
++ (NSInteger)sessionCount
+{
+    return [[NSUserDefaults standardUserDefaults] integerForKey:WPAppAnalyticsKeySessionCount];
+}
+
+- (NSInteger)incrementSessionCount
+{
+    NSInteger sessionCount = [[self class] sessionCount];
+    sessionCount++;
+
+    if (sessionCount == 1) {
+        [WPAnalytics track:WPAnalyticsStatAppInstalled];
+    }
+
+    [[NSUserDefaults standardUserDefaults] setInteger:sessionCount forKey:WPAppAnalyticsKeySessionCount];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+
+    return sessionCount;
 }
 
 #pragma mark - App Tracking
@@ -193,6 +224,26 @@ static NSString * const WPAppAnalyticsKeyTimeInApp = @"time_in_app";
     }
 }
 
++ (void)track:(WPAnalyticsStat)stat withPost:(AbstractPost *)postOrPage {
+    [WPAppAnalytics track:stat withProperties:nil withPost:postOrPage];
+}
+
++ (void)track:(WPAnalyticsStat)stat withProperties:(NSDictionary *)properties withPost:(AbstractPost *)postOrPage {
+    NSMutableDictionary *mutableProperties;
+    if (properties) {
+        mutableProperties = [NSMutableDictionary dictionaryWithDictionary:properties];
+    } else {
+        mutableProperties = [NSMutableDictionary new];
+    }
+
+    if (postOrPage.postID.integerValue > 0) {
+        mutableProperties[WPAppAnalyticsKeyPostID] = postOrPage.postID;
+    }
+
+    [WPAppAnalytics track:stat withProperties:mutableProperties withBlog:postOrPage.blog];
+}
+
+
 + (void)trackTrainTracksInteraction:(WPAnalyticsStat)stat withProperties:(NSDictionary *)properties
 {
     NSMutableDictionary *mutableProperties;
@@ -226,8 +277,9 @@ static NSString * const WPAppAnalyticsKeyTimeInApp = @"time_in_app";
 
 + (void)track:(WPAnalyticsStat)stat error:(NSError * _Nonnull)error {
     NSDictionary *properties = @{
-                                 @"error_code" : [@(error.code) stringValue],
-                                 @"error_domain": error.domain
+                                 @"error_code": [@(error.code) stringValue],
+                                 @"error_domain": error.domain,
+                                 @"error_description": error.description
     };
     [self track:stat withProperties: properties];
 }
@@ -249,21 +301,24 @@ static NSString * const WPAppAnalyticsKeyTimeInApp = @"time_in_app";
 
 #pragma mark - Usage tracking
 
-- (BOOL)isTrackingUsage
++ (BOOL)isTrackingUsage
 {
     return [[NSUserDefaults standardUserDefaults] boolForKey:WPAppAnalyticsDefaultsKeyUsageTracking];
 }
 
 - (void)setTrackingUsage:(BOOL)trackingUsage
 {
-    if (trackingUsage != [self isTrackingUsage]) {
+    if (trackingUsage != [WPAppAnalytics isTrackingUsage]) {
         [[NSUserDefaults standardUserDefaults] setBool:trackingUsage
                                                 forKey:WPAppAnalyticsDefaultsKeyUsageTracking];
+        [[NSUserDefaults standardUserDefaults] synchronize];
         
         if (trackingUsage) {
+            [self registerTrackers];
             [self beginSession];
         } else {
             [self endSession];
+            [self clearTrackers];
         }
     }
 }

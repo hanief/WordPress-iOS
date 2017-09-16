@@ -15,6 +15,8 @@ static NSInteger const ImageSizeMediumWidth = 480;
 static NSInteger const ImageSizeMediumHeight = 360;
 static NSInteger const ImageSizeLargeWidth = 640;
 static NSInteger const ImageSizeLargeHeight = 480;
+static NSInteger const JetpackProfessionalYearlyPlanId = 2004;
+static NSInteger const JetpackProfessionalMonthlyPlanId = 2001;
 
 NSString * const BlogEntityName = @"Blog";
 NSString * const PostFormatStandard = @"standard";
@@ -22,7 +24,6 @@ NSString * const ActiveModulesKeyPublicize = @"publicize";
 NSString * const ActiveModulesKeySharingButtons = @"sharedaddy";
 NSString * const OptionsKeyActiveModules = @"active_modules";
 NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled";
-
 
 @interface Blog ()
 
@@ -50,6 +51,7 @@ NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled"
 @dynamic media;
 @dynamic menus;
 @dynamic menuLocations;
+@dynamic roles;
 @dynamic currentThemeId;
 @dynamic lastPostsSync;
 @dynamic lastStatsSync;
@@ -62,7 +64,6 @@ NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled"
 @dynamic isActivated;
 @dynamic visible;
 @dynamic account;
-@dynamic jetpackAccount;
 @dynamic isAdmin;
 @dynamic isMultiAuthor;
 @dynamic isHostedAtWPcom;
@@ -71,8 +72,10 @@ NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled"
 @dynamic settings;
 @dynamic planID;
 @dynamic planTitle;
+@dynamic hasPaidPlan;
 @dynamic sharingButtons;
 @dynamic capabilities;
+@dynamic userID;
 
 @synthesize isSyncingPosts;
 @synthesize isSyncingPages;
@@ -259,9 +262,33 @@ NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled"
     }];
 }
 
+- (NSArray *)sortedConnections
+{
+    NSSortDescriptor *sortServiceDescriptor = [[NSSortDescriptor alloc] initWithKey:@"service"
+                                                                          ascending:YES
+                                                                           selector:@selector(localizedCaseInsensitiveCompare:)];
+    NSSortDescriptor *sortExternalNameDescriptor = [[NSSortDescriptor alloc] initWithKey:@"externalName"
+                                                                               ascending:YES
+                                                                                selector:@selector(caseInsensitiveCompare:)];
+    NSArray *sortDescriptors = @[sortServiceDescriptor, sortExternalNameDescriptor];
+    return [[self.connections allObjects] sortedArrayUsingDescriptors:sortDescriptors];
+}
+
+- (NSArray<Role *> *)sortedRoles
+{
+    return [self.roles sortedArrayUsingDescriptors:@[[NSSortDescriptor sortDescriptorWithKey:@"order" ascending:YES]]];
+}
+
 - (NSString *)defaultPostFormatText
 {
     return [self postFormatTextFromSlug:self.settings.defaultPostFormat];
+}
+
+- (BOOL)hasIcon
+{
+    // A blog without an icon has the blog url in icon, so we can't directly check its
+    // length to determine if we have an icon or not
+    return self.icon.length > 0 ? [NSURL URLWithString:self.icon].pathComponents.count > 1 : NO;
 }
 
 - (NSString *)postFormatTextFromSlug:(NSString *)postFormatSlug
@@ -378,11 +405,7 @@ NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled"
 
 - (NSString *)authToken
 {
-    if (self.jetpackAccount) {
-        return self.jetpackAccount.authToken;
-    } else {
-        return self.account.authToken;
-    }
+    return self.account.authToken;
 }
 
 - (NSString *)usernameForSite
@@ -421,20 +444,30 @@ NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled"
         case BlogFeaturePeople:
             return [self supportsRestApi] && self.isListingUsersAllowed;
         case BlogFeatureWPComRESTAPI:
+        case BlogFeatureCommentLikes:
         case BlogFeatureStats:
             return [self supportsRestApi];
         case BlogFeatureSharing:
             return [self supportsSharing];
-        case BlogFeatureCommentLikes:
+        case BlogFeatureOAuth2Login:
+            return [self isHostedAtWPcom];
         case BlogFeatureReblog:
         case BlogFeatureMentions:
-        case BlogFeatureOAuth2Login:
         case BlogFeaturePlans:
-            return [self isHostedAtWPcom];
+            return [self isHostedAtWPcom] && [self isAdmin];
+        case BlogFeaturePluginManagement:
+            return [self supportsRestApi] && ![self isHostedAtWPcom];
+        case BlogFeatureJetpackSettings:
+            return [self supportsRestApi] && ![self isHostedAtWPcom] && [self isAdmin];
         case BlogFeaturePushNotifications:
             return [self supportsPushNotifications];
         case BlogFeatureThemeBrowsing:
-            return [self isHostedAtWPcom] && [self isAdmin];
+            return [self supportsRestApi] && [self isAdmin];
+        case BlogFeatureCustomThemes:
+            return [self supportsRestApi] && [self isAdmin] && ![self isHostedAtWPcom];
+        case BlogFeaturePremiumThemes:
+            return [self supports:BlogFeatureCustomThemes] && (self.planID.integerValue == JetpackProfessionalYearlyPlanId
+                                                               || self.planID.integerValue == JetpackProfessionalMonthlyPlanId);
         case BlogFeatureMenus:
             return [self supportsRestApi] && [self isAdmin];
         case BlogFeaturePrivate:
@@ -444,18 +477,28 @@ NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled"
             return [self supportsSiteManagementServices];
         case BlogFeatureDomains:
             return [self isHostedAtWPcom] && [self supportsSiteManagementServices];
+        case BlogFeatureNoncePreviews:
+            return [self supportsRestApi] && ![self isHostedAtWPcom];
+        case BlogFeatureMediaMetadataEditing:
+            return [self supportsRestApi] && [self isAdmin];
+        case BlogFeatureMediaDeletion:
+            return [self isAdmin];
     }
 }
 
 -(BOOL)supportsSharing
 {
-    return ([self supportsPublicize] || [self supportsShareButtons]) && [self isAdmin];
+    return [self supportsPublicize] || [self supportsShareButtons];
 }
 
 - (BOOL)supportsPublicize
 {
-    // Publicize is only supported via REST, and for admins
+    // Publicize is only supported via REST
     if (![self supports:BlogFeatureWPComRESTAPI]) {
+        return NO;
+    }
+
+    if (![self isPublishingPostsAllowed]) {
         return NO;
     }
 
@@ -472,7 +515,7 @@ NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled"
 - (BOOL)supportsShareButtons
 {
     // Share Button settings are only supported via REST, and for admins
-    if (![self supports:BlogFeatureWPComRESTAPI]) {
+    if (![self isAdmin] || ![self supports:BlogFeatureWPComRESTAPI]) {
         return NO;
     }
 
@@ -494,26 +537,7 @@ NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled"
 - (BOOL)accountIsDefaultAccount
 {
     AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:self.managedObjectContext];
-    WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-    return [defaultAccount isEqual:self.account];
-}
-
-- (BOOL)jetpackAccountIsDefaultAccount
-{
-    AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:self.managedObjectContext];
-    WPAccount *defaultAccount = [accountService defaultWordPressComAccount];
-    return [defaultAccount isEqual:self.jetpackAccount];
-}
-
-- (nullable NSNumber *)siteID
-{
-    if (self.account) {
-        return self.dotComID;
-    }
-    else if (self.jetpackAccount && self.jetpack.siteID) {
-        return self.jetpack.siteID;
-    }
-    return nil;
+    return [accountService isDefaultWordPressComAccount:self.account];
 }
 
 - (NSNumber *)dotComID
@@ -574,8 +598,6 @@ NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled"
     NSString *extra = @"";
     if (self.account) {
         extra = [NSString stringWithFormat:@" wp.com account: %@ blogId: %@ plan: %@ (%@)", self.account ? self.account.username : @"NO", self.dotComID, self.planTitle, self.planID];
-    } else if (self.jetpackAccount) {
-        extra = [NSString stringWithFormat:@" jetpack: 🚀🚀 Jetpack %@ fully connected as %@ with site ID %@", self.jetpack.version, self.jetpackAccount.username, self.jetpack.siteID];
     } else {
         extra = [NSString stringWithFormat:@" jetpack: %@", [self.jetpack description]];
     }
@@ -600,8 +622,6 @@ NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled"
 {
     if (self.account) {
         return self.account.wordPressComRestApi;
-    } else if ([self jetpackRESTSupported]) {
-        return self.jetpackAccount.wordPressComRestApi;
     }
     return nil;
 }
@@ -609,7 +629,7 @@ NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled"
 - (BOOL)supportsRestApi {
     // We don't want to check for `restApi` as it can be `nil` when the token
     // is missing from the keychain.
-    return (self.account || [self jetpackRESTSupported]);
+    return self.account != nil;
 }
 
 #pragma mark - Jetpack
@@ -625,18 +645,13 @@ NSString * const OptionsKeyPublicizeDisabled = @"publicize_permanently_disabled"
     _jetpack = [JetpackState new];
     _jetpack.siteID = [[self getOptionValue:@"jetpack_client_id"] numericValue];
     _jetpack.version = [self getOptionValue:@"jetpack_version"];
-    if (self.jetpackAccount.username) {
-        _jetpack.connectedUsername = self.jetpackAccount.username;
+    if (self.account.username) {
+        _jetpack.connectedUsername = self.account.username;
     } else {
         _jetpack.connectedUsername = [self getOptionValue:@"jetpack_user_login"];
     }
     _jetpack.connectedEmail = [self getOptionValue:@"jetpack_user_email"];
     return _jetpack;
-}
-
-- (BOOL)jetpackRESTSupported
-{
-    return self.jetpackAccount && self.dotComID;
 }
 
 - (BOOL)jetpackActiveModule:(NSString *)moduleName

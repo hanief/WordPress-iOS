@@ -1,24 +1,27 @@
 import Foundation
 import WPMediaPicker
-import WordPressComAnalytics
-
+import WordPressShared
+import Photos
 
 // Encapsulates all of the interactions required to capture a new Gravatar image, and resize it.
 //
-class GravatarPickerViewController : UIViewController, WPMediaPickerViewControllerDelegate
-{
+class GravatarPickerViewController: UIViewController, WPMediaPickerViewControllerDelegate {
     // MARK: - Public Properties
 
-    var onCompletion : (UIImage? -> Void)?
+    var onCompletion: ((UIImage?) -> Void)?
 
     // MARK: - Private Properties
 
-    private lazy var mediaPickerAssetDataSource: WPPHAssetDataSource? = {
-        let collectionsFetchResult = PHAssetCollection.fetchAssetCollectionsWithType(.SmartAlbum, subtype: .SmartAlbumSelfPortraits, options: nil)
-        guard let assetCollection = collectionsFetchResult.firstObject as? PHAssetCollection else { return nil }
+    fileprivate var mediaPickerViewController: WPNavigationMediaPickerViewController!
+
+    fileprivate lazy var mediaPickerAssetDataSource: WPPHAssetDataSource? = {
+        let collectionsFetchResult = PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .smartAlbumSelfPortraits, options: nil)
+        guard let assetCollection = collectionsFetchResult.firstObject else {
+            return nil
+        }
 
         let dataSource = WPPHAssetDataSource()
-        dataSource.setSelectedGroup(PHAssetCollectionForWPMediaGroup(collection: assetCollection, mediaType: .Image))
+        dataSource.setSelectedGroup(PHAssetCollectionForWPMediaGroup(collection: assetCollection, mediaType: .image))
         return dataSource
     }()
 
@@ -32,11 +35,11 @@ class GravatarPickerViewController : UIViewController, WPMediaPickerViewControll
 
     // MARK: - WPMediaPickerViewControllerDelegate
 
-    func mediaPickerController(picker: WPMediaPickerViewController, shouldShowAsset asset: WPMediaAsset) -> Bool {
-        return asset.isKindOfClass(PHAsset)
+    func mediaPickerController(_ picker: WPMediaPickerViewController, shouldShow asset: WPMediaAsset) -> Bool {
+        return asset.isKind(of: PHAsset.self)
     }
 
-    func mediaPickerController(picker: WPMediaPickerViewController, didFinishPickingAssets assets: [AnyObject]) {
+    func mediaPickerController(_ picker: WPMediaPickerViewController, didFinishPicking assets: [WPMediaAsset]) {
         // Export the UIImage Asset
         guard let asset = assets.first as? PHAsset else {
             onCompletion?(nil)
@@ -50,15 +53,15 @@ class GravatarPickerViewController : UIViewController, WPMediaPickerViewControll
             }
 
             // Track
-            WPAppAnalytics.track(.GravatarCropped)
+            WPAppAnalytics.track(.gravatarCropped)
 
             // Proceed Cropping
             let imageCropViewController = self.newImageCropViewController(rawGravatar)
-            picker.showAfterViewController(imageCropViewController)
+            self.mediaPickerViewController.show(after: imageCropViewController)
         }
     }
 
-    func mediaPickerControllerDidCancel(picker: WPMediaPickerViewController) {
+    func mediaPickerControllerDidCancel(_ picker: WPMediaPickerViewController) {
         onCompletion?(nil)
     }
 
@@ -67,46 +70,51 @@ class GravatarPickerViewController : UIViewController, WPMediaPickerViewControll
 
     // Instantiates a new MediaPickerViewController, and sets it up as a children ViewController.
     //
-    private func setupChildrenViewControllers() {
+    fileprivate func setupChildrenViewControllers() {
         let pickerViewController = newMediaPickerViewController()
 
-        pickerViewController.willMoveToParentViewController(self)
+        pickerViewController.willMove(toParentViewController: self)
         pickerViewController.view.bounds = view.bounds
         view.addSubview(pickerViewController.view)
         addChildViewController(pickerViewController)
-        pickerViewController.didMoveToParentViewController(self)
+        pickerViewController.didMove(toParentViewController: self)
+
+        mediaPickerViewController = pickerViewController
     }
 
     // Returns a new WPMediaPickerViewController instance.
     //
-    private func newMediaPickerViewController() -> WPMediaPickerViewController {
-        let pickerViewController = WPMediaPickerViewController()
+    fileprivate func newMediaPickerViewController() -> WPNavigationMediaPickerViewController {
+        let options = WPMediaPickerOptions()
+        options.showMostRecentFirst = true
+        options.filter = [.image]
+        options.preferFrontCamera = true
+        options.allowMultipleSelection = false
+
+        let pickerViewController = WPNavigationMediaPickerViewController(options: options)
         pickerViewController.delegate = self
-        pickerViewController.showMostRecentFirst = true
-        pickerViewController.allowMultipleSelection = false
-        pickerViewController.filter = .Image
-        pickerViewController.preferFrontCamera = true
         pickerViewController.dataSource = mediaPickerAssetDataSource
+        pickerViewController.startOnGroupSelector = false
         return pickerViewController
     }
 
     // Returns a new ImageCropViewController instance.
     //
-    private func newImageCropViewController(rawGravatar: UIImage) -> ImageCropViewController {
+    fileprivate func newImageCropViewController(_ rawGravatar: UIImage) -> ImageCropViewController {
         let imageCropViewController = ImageCropViewController(image: rawGravatar)
-        imageCropViewController.onCompletion = { [weak self] image in
+        imageCropViewController.onCompletion = { [weak self] image, _ in
             self?.onCompletion?(image)
-            self?.dismissViewControllerAnimated(true, completion: nil)
+            self?.dismiss(animated: true, completion: nil)
         }
 
         return imageCropViewController
     }
 
-    override func preferredStatusBarStyle() -> UIStatusBarStyle {
-        return .LightContent
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        return .lightContent
     }
 
-    override func childViewControllerForStatusBarStyle() -> UIViewController? {
+    override var childViewControllerForStatusBarStyle: UIViewController? {
         return nil
     }
 

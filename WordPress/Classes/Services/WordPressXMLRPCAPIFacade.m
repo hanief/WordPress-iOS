@@ -1,5 +1,5 @@
 #import "WordPressXMLRPCAPIFacade.h"
-#import <WPXMLRPC/WPXMLRPC.h>
+#import <wpxmlrpc/WPXMLRPC.h>
 #import "WordPress-Swift.h"
 
 
@@ -8,6 +8,7 @@
 
 @end
 
+NSString *const XMLRPCOriginalErrorKey = @"XMLRPCOriginalErrorKey";
 
 @implementation WordPressXMLRPCAPIFacade
 
@@ -16,7 +17,10 @@
                       failure:(void (^)(NSError *error))failure
 {
     WordPressOrgXMLRPCValidator *validator = [[WordPressOrgXMLRPCValidator alloc] init];
-    [validator guessXMLRPCURLForSite:url success:success failure:^(NSError *error) {
+    [validator guessXMLRPCURLForSite:url
+                           userAgent:WPUserAgent.wordPressUserAgent
+                             success:success
+                             failure:^(NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             failure([self errorForGuessXMLRPCApiFailure:error]);
         });
@@ -36,7 +40,8 @@
     } else {
         NSDictionary *userInfo = @{
                                    NSLocalizedDescriptionKey: NSLocalizedString(@"Unable to read the WordPress site at that URL. Tap 'Need Help?' to view the FAQ.", nil),
-                                   NSLocalizedFailureReasonErrorKey: error.localizedDescription
+                                   NSLocalizedFailureReasonErrorKey: error.localizedDescription,
+                                   XMLRPCOriginalErrorKey: error
                                    };
         NSError *err = [NSError errorWithDomain:WordPressAppErrorDomain code:NSURLErrorBadURL userInfo:userInfo];
         return err;
@@ -46,15 +51,22 @@
 - (void)getBlogOptionsWithEndpoint:(NSURL *)xmlrpc
                          username:(NSString *)username
                          password:(NSString *)password
-                          success:(void (^)(id options))success
+                          success:(void (^)(NSDictionary *options))success
                           failure:(void (^)(NSError *error))failure;
 {
     
     WordPressOrgXMLRPCApi *api = [[WordPressOrgXMLRPCApi alloc] initWithEndpoint:xmlrpc userAgent:[WPUserAgent wordPressUserAgent]];
     [api checkCredentials:username password:password success:^(id responseObject, NSHTTPURLResponse *httpResponse) {
         dispatch_async(dispatch_get_main_queue(), ^{
+            if (![responseObject isKindOfClass:[NSDictionary class]]) {
+                if (failure) {
+                    NSError *error = [NSError errorWithDomain:WordPressOrgXMLRPCApiErrorDomain code:WordPressOrgXMLRPCApiErrorResponseSerializationFailed userInfo:nil];
+                    failure(error);
+                }
+                return;
+            }
             if (success) {
-                success(responseObject);
+                success((NSDictionary *)responseObject);
             }
         });
 

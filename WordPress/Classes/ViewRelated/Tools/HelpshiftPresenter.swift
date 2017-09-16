@@ -5,10 +5,12 @@ import UIKit
 /// or a conversation) from anywhere in the app.
 ///
 @objc class HelpshiftPresenter: NSObject {
-    // Passed into options when displaying a Helpshift window, so that users are presented
-    // a list of possibly related FAQs with matching terms before posting a new conversation.
-    private static let HelpshiftShowsSearchOnNewConversationKey = "showSearchOnNewConversation"
 
+    /// set the source of the presenter for tagging in Helpshift
+    var sourceTag: SupportSourceTag?
+
+    /// any additional options to pass along to helpshift
+    var optionsDictionary: [AnyHashable: Any]?
 
     /// Presents a Helpshift window displaying a specific FAQ.
     ///
@@ -16,9 +18,9 @@ import UIKit
     ///   - faqID: The 'publish ID' of the FAQ to display.
     ///   - viewController: The view controller from which to present the Helpshift window.
     ///   - completion: Optional block to be called when the window is presented.
-    func presentHelpshiftWindowForFAQ(faqID: String, fromViewController viewController: UIViewController, completion: (() -> Void)?) {
+    func presentHelpshiftWindowForFAQ(_ faqID: String, fromViewController viewController: UIViewController, completion: (() -> Void)?) {
         prepareToDisplayHelpshiftWindow(false) {
-            HelpshiftSupport.showSingleFAQ(faqID, withController: viewController, withOptions: self.optionsDictionary)
+            HelpshiftSupport.showSingleFAQ(faqID, with: viewController, with: self.helpshiftConfig())
             completion?()
         }
     }
@@ -30,9 +32,9 @@ import UIKit
     ///   - refreshUserDetails: If `true`, refresh user ID, display name, and email emailAddress
     ///     from the WordPress.com REST API (if appropriate) before displaying the window.
     ///   - completion: Optional block to be called when the window is presented.
-    func presentHelpshiftConversationWindowFromViewController(viewController: UIViewController, refreshUserDetails: Bool, completion: (() -> Void)?) {
+    func presentHelpshiftConversationWindowFromViewController(_ viewController: UIViewController, refreshUserDetails: Bool, completion: (() -> Void)?) {
         prepareToDisplayHelpshiftWindow(refreshUserDetails) {
-            HelpshiftSupport.showConversation(viewController, withOptions: self.optionsDictionary)
+            HelpshiftSupport.showConversation(viewController, with: self.helpshiftConfig())
             completion?()
         }
     }
@@ -44,20 +46,20 @@ import UIKit
     ///   - refreshUserDetails: If `true`, refresh user ID, display name, and email emailAddress
     ///     from the WordPress.com REST API (if appropriate) before displaying the window.
     ///   - completion: Optional block to be called when the window is presented.
-    func presentHelpshiftFAQWindowFromViewController(viewController: UIViewController, refreshUserDetails: Bool, completion: (() -> Void)?) {
+    func presentHelpshiftFAQWindowFromViewController(_ viewController: UIViewController, refreshUserDetails: Bool, completion: (() -> Void)?) {
         prepareToDisplayHelpshiftWindow(refreshUserDetails) {
-            HelpshiftSupport.showFAQs(viewController, withOptions: self.optionsDictionary)
+            HelpshiftSupport.showFAQs(viewController, with: self.helpshiftConfig())
             completion?()
         }
     }
 
-    private func updateHelpshiftUserDetailsWithAccount(account: WPAccount) {
+    fileprivate func updateHelpshiftUserDetailsWithAccount(_ account: WPAccount) {
         HelpshiftSupport.setUserIdentifier(account.userID.stringValue)
         HelpshiftCore.setName(account.displayName, andEmail: account.email)
     }
 
-    private func prepareToDisplayHelpshiftWindow(refreshUserDetails: Bool, completion: () -> Void) {
-        NSUserDefaults.standardUserDefaults().setBool(true, forKey: UserDefaultsHelpshiftWasUsed)
+    fileprivate func prepareToDisplayHelpshiftWindow(_ refreshUserDetails: Bool, completion: @escaping () -> Void) {
+        UserDefaults.standard.set(true, forKey: UserDefaultsHelpshiftWasUsed)
 
         PushNotificationsManager.sharedInstance.registerForRemoteNotifications()
         InteractiveNotificationsManager.sharedInstance.requestAuthorization()
@@ -76,7 +78,7 @@ import UIKit
             return
         }
 
-        accountService.updateUserDetailsForAccount(defaultAccount, success: {
+        accountService.updateUserDetails(for: defaultAccount, success: {
             self.updateHelpshiftUserDetailsWithAccount(defaultAccount)
             completion()
             }, failure: { _ in
@@ -84,8 +86,27 @@ import UIKit
         })
     }
 
-    private var optionsDictionary: [NSObject: AnyObject] {
-        return [HelpshiftSupportCustomMetadataKey: HelpshiftUtils.helpshiftMetadata(),
-                HelpshiftPresenter.HelpshiftShowsSearchOnNewConversationKey: true]
+    fileprivate func helpshiftConfig() -> HelpshiftAPIConfig {
+        let tags: [String]
+        if let sourceTag = sourceTag {
+            tags = [String(sourceTag.rawValue)]
+        } else {
+            tags = []
+        }
+
+        var metaData = HelpshiftUtils.helpshiftMetadata(withTags: tags) as [AnyHashable: Any]
+        if let customOptions = optionsDictionary {
+            customOptions.forEach {
+                metaData[$0] = $1
+            }
+        }
+
+        let config: [AnyHashable: Any] = [HelpshiftSupportCustomMetadataKey: metaData]
+
+        let builder = HelpshiftAPIConfigBuilder()
+        builder.extraConfig = config
+        builder.showSearchOnNewConversation = true
+
+        return builder.build()
     }
 }

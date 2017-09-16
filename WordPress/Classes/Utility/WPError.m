@@ -1,14 +1,14 @@
 #import "WPError.h"
 #import "WordPressAppDelegate.h"
 #import "WPAccount.h"
-#import "NSString+XMLExtensions.h"
-#import "NSString+Helpers.h"
 #import "SupportViewController.h"
+#import <WordPressShared/NSString+XMLExtensions.h>
+#import <wpxmlrpc/WPXMLRPC.h>
 #import "WordPress-Swift.h"
-#import <WPXMLRPC/WPXMLRPC.h>
 
 NSInteger const SupportButtonIndex = 0;
-NSString *const WordPressAppErrorDomain = @"org.wordpress.iphone";
+NSString * const WordPressAppErrorDomain = @"org.wordpress.iphone";
+NSString * const WPErrorSupportSourceKey = @"helpshift-support-source";
 
 @interface WPError ()
 
@@ -104,15 +104,17 @@ NSString *const WordPressAppErrorDomain = @"org.wordpress.iphone";
             title = customTitle;
         }
     }
+    
+    NSString *sourceTag = [error.userInfo stringForKey:WPErrorSupportSourceKey];
 
-    [self showAlertWithTitle:title message:message];
+    [self showAlertWithTitle:title message:message withSupportButton:YES fromSource:sourceTag okPressedBlock:nil];
 }
 
 + (void)showXMLRPCErrorAlert:(NSError *)error
 {
     NSString *cleanedErrorMsg = [error localizedDescription];
 
-    if ([error.domain isEqualToString:WPXMLRPCFaultErrorDomain] && error.code == 401){
+    if ([error.domain isEqualToString:WPXMLRPCFaultErrorDomain] && error.code == 401) {
         cleanedErrorMsg = NSLocalizedString(@"Sorry, you cannot access this feature. Please check your User Role on this site.", @"");
     }
 
@@ -141,35 +143,44 @@ NSString *const WordPressAppErrorDomain = @"org.wordpress.iphone";
 
 + (void)showAlertWithTitle:(NSString *)title message:(NSString *)message withSupportButton:(BOOL)showSupport okPressedBlock:(void (^)(UIAlertController *))okBlock
 {
-    if ([WPError internalInstance].alertShowing) {
-        return;
-    }
-    [WPError internalInstance].alertShowing = YES;
+    [self showAlertWithTitle:title message:message withSupportButton:showSupport fromSource:nil okPressedBlock:okBlock];
+}
 
-    DDLogInfo(@"Showing alert with title: %@ and message %@", title, message);
-    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:title
-                                                                             message:[message stringByStrippingHTML]
-                                                                      preferredStyle:UIAlertControllerStyleAlert];
++ (void)showAlertWithTitle:(NSString *)title message:(NSString *)message withSupportButton:(BOOL)showSupport fromSource:(NSString *)sourceTag okPressedBlock:(void (^)(UIAlertController *))okBlock
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if ([WPError internalInstance].alertShowing) {
+            return;
+        }
+        [WPError internalInstance].alertShowing = YES;
 
-    UIAlertAction *action = [UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil)
-                                                     style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-                                                         if (okBlock) {
-                                                             okBlock(alertController);
-                                                         }
-                                                         [WPError internalInstance].alertShowing = NO;
-                                                     }];
-    [alertController addAction:action];
-    if (showSupport) {
-        NSString *supportText = NSLocalizedString(@"Need Help?", @"'Need help?' button label, links off to the WP for iOS FAQ.");
-        UIAlertAction *action = [UIAlertAction actionWithTitle:supportText
-                                                         style:UIAlertActionStyleCancel
-                                                       handler:^(UIAlertAction * _Nonnull action) {
-                                                            [SupportViewController showFromTabBar];
-                                                           [WPError internalInstance].alertShowing = NO;
-                                                       }];
+        DDLogInfo(@"Showing alert with title: %@ and message %@", title, message);
+        UIAlertController *alertController = [UIAlertController alertControllerWithTitle:title
+                                                                                 message:[message stringByStrippingHTML]
+                                                                          preferredStyle:UIAlertControllerStyleAlert];
+
+        UIAlertAction *action = [UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil)
+                                                         style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+                                                             if (okBlock) {
+                                                                 okBlock(alertController);
+                                                             }
+                                                             [WPError internalInstance].alertShowing = NO;
+                                                         }];
         [alertController addAction:action];
-    }
-    [alertController presentFromRootViewController];
+        if (showSupport) {
+            NSString *supportText = NSLocalizedString(@"Need Help?", @"'Need help?' button label, links off to the WP for iOS FAQ.");
+            UIAlertAction *action = [UIAlertAction actionWithTitle:supportText
+                                                             style:UIAlertActionStyleCancel
+                                                           handler:^(UIAlertAction * _Nonnull action) {
+                                                               SupportViewController *supportVC = [SupportViewController new];
+                                                               supportVC.sourceTag = sourceTag;
+                                                               [supportVC showFromTabBar];
+                                                               [WPError internalInstance].alertShowing = NO;
+                                                           }];
+            [alertController addAction:action];
+        }
+        [alertController presentFromRootViewController];
+    });
 }
 
 @end

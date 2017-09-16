@@ -16,25 +16,27 @@ extension NSAttributedString {
     ///      use the system font), but font size and bold / italic information
     ///      will be applied.
     ///
-    class func attributedStringWithHTML(htmlString: String, attributes: StyledHTMLAttributes?) -> NSAttributedString {
+    class func attributedStringWithHTML(_ htmlString: String, attributes: StyledHTMLAttributes?) -> NSAttributedString {
         let styles = styleTagTextForAttributes(attributes)
         let styledString = styles + htmlString
-        let attributedString = try! NSMutableAttributedString(
-            data: styledString.dataUsingEncoding(NSUTF8StringEncoding)!,
-            options: [ NSDocumentTypeDocumentAttribute: NSHTMLTextDocumentType, NSCharacterEncodingDocumentAttribute: NSUTF8StringEncoding ],
-            documentAttributes: nil)
+        guard let data = styledString.data(using: String.Encoding.utf8),
+            let attributedString = try? NSMutableAttributedString(
+            data: data,
+            options: [ NSDocumentTypeDocumentAttribute: NSHTMLTextDocumentType, NSCharacterEncodingDocumentAttribute: NSNumber(value: String.Encoding.utf8.rawValue) ],
+            documentAttributes: nil) else {
+                // if creating the html-ed string fails (and it has, thus this change) we return the string without any styling
+                return NSAttributedString(string: htmlString)
+        }
 
         // We can't apply text alignment through CSS, as we need to add a paragraph
         // style to set paragraph spacing (which will override any text alignment
         // set via CSS). So we'll look for a paragraph style specified for the
         // body of the text, so we can copy it use its text alignment.
-        let paragraphStyle: NSMutableParagraphStyle
+        let paragraphStyle = NSMutableParagraphStyle()
         if let attributes = attributes,
             let bodyAttributes = attributes[.BodyAttribute],
             let pStyle = bodyAttributes[NSParagraphStyleAttributeName] as? NSParagraphStyle {
-            paragraphStyle = pStyle.mutableCopy() as! NSMutableParagraphStyle
-        } else {
-            paragraphStyle = NSMutableParagraphStyle()
+                paragraphStyle.setParagraphStyle(pStyle)
         }
 
         // Remove extra padding at the top and bottom of the text.
@@ -45,10 +47,10 @@ extension NSAttributedString {
                                    value: paragraphStyle,
                                    range: NSMakeRange(0, attributedString.string.characters.count - 1))
 
-        return attributedString.copy() as! NSAttributedString
+        return NSAttributedString(attributedString: attributedString)
     }
 
-    private class func styleTagTextForAttributes(attributes: StyledHTMLAttributes?) -> String {
+    fileprivate class func styleTagTextForAttributes(_ attributes: StyledHTMLAttributes?) -> String {
         let styles: [String]? = attributes?.map { attributeType, attributes in
             var style = attributeType.tag + " { "
             for (attributeName, attribute) in attributes {
@@ -60,13 +62,13 @@ extension NSAttributedString {
             return style + " }"
         }
 
-        let joinedStyles = styles?.joinWithSeparator("") ?? ""
+        let joinedStyles = styles?.joined(separator: "") ?? ""
         return "<style>" + joinedStyles + "</style>"
     }
 
     /// Converts a limited set of `NSAttributedString` attribute types from their
     /// raw objects (e.g. `UIColor`) into CSS text.
-    private class func cssStyleForAttributeName(attributeName: String, attribute: AnyObject) -> String? {
+    fileprivate class func cssStyleForAttributeName(_ attributeName: String, attribute: AnyObject) -> String? {
         switch attributeName {
         case NSFontAttributeName:
             if let font = attribute as? UIFont {
@@ -76,13 +78,13 @@ extension NSAttributedString {
                 return "font-family: -apple-system; font-size: \(size)px; " + boldStyle + italicStyle
             }
         case NSForegroundColorAttributeName:
-            if let color = attribute as? UIColor {
-                let colorHex = color.hexString()
+            if let color = attribute as? UIColor,
+                let colorHex = color.hexString() {
                 return "color: #\(colorHex);"
             }
         case NSUnderlineStyleAttributeName:
             if let style = attribute as? Int {
-                if style == NSUnderlineStyle.StyleNone.rawValue {
+                if style == NSUnderlineStyle.styleNone.rawValue {
                     return "text-decoration: none;"
                 } else {
                     return "text-decoration: underline;"
@@ -115,10 +117,10 @@ public enum HTMLAttributeType: String {
 
 private extension UIFont {
     var isBold: Bool {
-        return fontDescriptor().symbolicTraits.contains(.TraitBold)
+        return fontDescriptor.symbolicTraits.contains(.traitBold)
     }
 
     var isItalic: Bool {
-        return fontDescriptor().symbolicTraits.contains(.TraitItalic)
+        return fontDescriptor.symbolicTraits.contains(.traitItalic)
     }
 }

@@ -15,11 +15,11 @@ static NSString * const WordPressComOAuthKeychainServiceName = @"public-api.word
 
 @dynamic username;
 @dynamic blogs;
-@dynamic jetpackBlogs;
 @dynamic defaultBlog;
 @dynamic uuid;
 @dynamic dateCreated;
 @dynamic email;
+@dynamic emailVerified;
 @dynamic displayName;
 @dynamic userID;
 @dynamic avatarURL;
@@ -44,6 +44,11 @@ static NSString * const WordPressComOAuthKeychainServiceName = @"public-api.word
 {
     [super didTurnIntoFault];
     _wordPressComRestApi = nil;
+}
+
++ (NSString *)entityName
+{
+    return @"Account";
 }
 
 #pragma mark - Custom accessors
@@ -117,6 +122,16 @@ static NSString * const WordPressComOAuthKeychainServiceName = @"public-api.word
                                                                   selector:@selector(localizedCaseInsensitiveCompare:)];
 
     return [visibleBlogs sortedArrayUsingDescriptors:@[descriptor]];
+}
+
+- (NSString *)verificationStatus {
+    if (!self.emailVerified) {
+        return @"unknown";
+    } else if ([self.emailVerified boolValue]) {
+        return @"verified";
+    } else {
+        return @"unverified";
+    }
 }
 
 #pragma mark - API Helpers

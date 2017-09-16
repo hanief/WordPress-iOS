@@ -3,29 +3,35 @@
 #import "Media.h"
 #import "WPAccount.h"
 #import "ContextManager.h"
-#import "MediaServiceRemoteXMLRPC.h"
-#import "MediaServiceRemoteREST.h"
 #import "Blog.h"
-#import "RemoteMedia.h"
-#import "WPImageSource.h"
 #import "UIImage+Resize.h"
 #import <MobileCoreServices/MobileCoreServices.h>
-#import "WordPress-swift.h"
+#import "WordPress-Swift.h"
 #import "WPXMLRPCDecoder.h"
-#import "PhotonImageURLHelper.h"
+#import <WordPressShared/WPImageSource.h>
+#import "MediaService+Legacy.h"
+#import <WordPressShared/WPAnalytics.h>
+@import WordPressKit;
+@import WordPressShared;
+
+@interface MediaService ()
+
+@property (nonatomic, strong) MediaThumbnailService *thumbnailService;
+
+@end
 
 @implementation MediaService
+
+#pragma mark - Creating media
 
 - (void)createMediaWithURL:(NSURL *)url
            forPostObjectID:(NSManagedObjectID *)postObjectID
          thumbnailCallback:(void (^)(NSURL *thumbnailURL))thumbnailCallback
                 completion:(void (^)(Media *media, NSError *error))completion
 {
-
     NSString *mediaName = [[url pathComponents] lastObject];
-
-    [self createMediaWith:url
-          forPostObjectID:postObjectID
+    [self exportMediaWith:url
+                 objectID:postObjectID
                 mediaName:mediaName
         thumbnailCallback:thumbnailCallback
                completion:completion
@@ -38,8 +44,8 @@
            thumbnailCallback:(void (^)(NSURL *thumbnailURL))thumbnailCallback
                   completion:(void (^)(Media *media, NSError *error))completion
 {
-    [self createMediaWith:image
-          forPostObjectID:postObjectID
+    [self exportMediaWith:image
+                 objectID:postObjectID
                 mediaName:mediaID
         thumbnailCallback:thumbnailCallback
                completion:completion
@@ -52,146 +58,159 @@
                     completion:(void (^)(Media *media, NSError *error))completion
 {
     NSString *mediaName = [asset originalFilename];
-    
-    [self createMediaWith:asset
-          forPostObjectID:postObjectID
+    [self exportMediaWith:asset
+                 objectID:postObjectID
                 mediaName:mediaName
         thumbnailCallback:thumbnailCallback
                completion:completion
      ];
 }
 
-- (void)createMediaWith:(id<ExportableAsset>)asset
-        forPostObjectID:(NSManagedObjectID *)postObjectID
+- (void)createMediaWithPHAsset:(PHAsset *)asset
+               forBlogObjectID:(NSManagedObjectID *)blogObjectID
+             thumbnailCallback:(void (^)(NSURL *thumbnailURL))thumbnailCallback
+                    completion:(void (^)(Media *media, NSError *error))completion
+{
+    NSString *mediaName = [asset originalFilename];
+    [self exportMediaWith:asset
+                 objectID:blogObjectID
+                mediaName:mediaName
+        thumbnailCallback:thumbnailCallback
+               completion:completion
+     ];
+}
+
+- (void)createMediaWithImage:(UIImage *)image
+             forBlogObjectID:(NSManagedObjectID *)blogObjectID
+           thumbnailCallback:(void (^)(NSURL *thumbnailURL))thumbnailCallback
+                  completion:(void (^)(Media *media, NSError *error))completion
+{
+    [self exportMediaWith:image
+                 objectID:blogObjectID
+                mediaName:[[NSUUID UUID] UUIDString]
+        thumbnailCallback:thumbnailCallback
+               completion:completion];
+}
+
+#pragma mark - Private exporting
+
+- (void)exportMediaWith:(id<ExportableAsset>)exportable
+               objectID:(NSManagedObjectID *)objectID
               mediaName:(NSString *)mediaName
       thumbnailCallback:(void (^)(NSURL *thumbnailURL))thumbnailCallback
              completion:(void (^)(Media *media, NSError *error))completion
 {
+    // Revert to legacy category methods if not using the new exporting services.
+    if (![self supportsNewMediaExports]) {
+        [self createMediaWith:exportable
+                  forObjectID:objectID
+                    mediaName:mediaName
+            thumbnailCallback:thumbnailCallback
+                   completion:completion];
+        return;
+    }
+
+    // Use the new export services as indicated by the FeatureFlag.
+    AbstractPost *post = nil;
+    Blog *blog = nil;
     NSError *error = nil;
-    AbstractPost *post = (AbstractPost *)[self.managedObjectContext existingObjectWithID:postObjectID error:&error];
-    if (!post) {
+    NSManagedObject *existingObject = [self.managedObjectContext existingObjectWithID:objectID error:&error];
+    if ([existingObject isKindOfClass:[AbstractPost class]]) {
+        post = (AbstractPost *)existingObject;
+        blog = post.blog;
+    } else if ([existingObject isKindOfClass:[Blog class]]) {
+        blog = (Blog *)existingObject;
+    }
+    if (!post && !blog) {
         if (completion) {
             completion(nil, error);
         }
         return;
     }
-    
-    MediaType mediaType = [asset assetMediaType];
-    NSString *assetUTI = [asset originalUTI];
-    NSString *extension = [self extensionForUTI:assetUTI];
-    if (mediaType == MediaTypeImage) {
-        NSSet *allowedFileTypes = post.blog.allowedFileTypes;
-        if (![allowedFileTypes containsObject:extension]) {
-            assetUTI = (__bridge NSString *)kUTTypeJPEG;
-            extension = [self extensionForUTI:assetUTI];
+
+    // Setup completion handlers
+    void(^completionWithMedia)(Media *) = ^(Media *media) {
+        // Pre-generate a thumbnail image, see the method notes.
+        [self exportPlaceholderThumbnailForMedia:media
+                                      completion:thumbnailCallback];
+        if (completion) {
+            completion(media, nil);
         }
-    } else if (mediaType == MediaTypeVideo) {
-        if (![post.blog isHostedAtWPcom]) {
-            assetUTI = (__bridge NSString *)kUTTypeQuickTimeMovie;
-            extension = [self extensionForUTI:assetUTI];
+    };
+    void(^completionWithError)( NSError *) = ^(NSError *error) {
+        if (completion) {
+            completion(nil, error);
         }
+    };
+
+    // Export based on the type of the exportable.
+    MediaExportService *exportService = [[MediaExportService alloc] initWithManagedObjectContext:self.managedObjectContext];
+    if ([exportable isKindOfClass:[PHAsset class]]) {
+        [exportService exportMediaWithBlog:blog
+                                     asset:(PHAsset *)exportable
+                              onCompletion:completionWithMedia
+                                   onError:completionWithError];
+    } else if ([exportable isKindOfClass:[UIImage class]]) {
+        [exportService exportMediaWithBlog:blog
+                                     image:(UIImage *)exportable
+                              onCompletion:completionWithMedia
+                                   onError:completionWithError];
+    } else if ([exportable isKindOfClass:[NSURL class]]) {
+        [exportService exportMediaWithBlog:blog
+                                       url:(NSURL *)exportable
+                              onCompletion:completionWithMedia
+                                   onError:completionWithError];
+    } else {
+        completionWithError(nil);
     }
-    
-    MediaSettings *mediaSettings = [MediaSettings new];
-    BOOL stripGeoLocation = mediaSettings.removeLocationSetting;
-
-    NSInteger maxImageSize = [mediaSettings imageSizeForUpload];
-    CGSize maximumResolution = CGSizeMake(maxImageSize, maxImageSize);
-    
-    NSURL *mediaURL = [self urlForMediaWithFilename:mediaName andExtension:extension];
-    NSURL *mediaThumbnailURL = [self urlForMediaWithFilename:[self pathForThumbnailOfFile:[mediaURL lastPathComponent]]
-                                                andExtension:[self extensionForUTI:[asset defaultThumbnailUTI]]];
-    
-    [[self.class queueForResizeMediaOperations] addOperationWithBlock:^{
-        [asset exportThumbnailToURL:mediaThumbnailURL
-                         targetSize:[UIScreen mainScreen].bounds.size
-                        synchronous:YES
-                     successHandler:^(CGSize thumbnailSize) {
-                         if (thumbnailCallback) {
-                             thumbnailCallback(mediaThumbnailURL);
-                         }
-                         if ([assetUTI isEqual:(__bridge NSString *)kUTTypeGIF]) {
-                             // export original gif
-                             [asset exportOriginalImage:mediaURL successHandler:^(CGSize resultingSize) {
-                                 [self createMediaForPost:postObjectID
-                                                 mediaURL:mediaURL
-                                        mediaThumbnailURL:mediaThumbnailURL
-                                                mediaType:mediaType
-                                                mediaSize:resultingSize
-                                               completion:completion];
-                             } errorHandler:^(NSError * _Nonnull error) {
-                                 if (completion){
-                                     completion(nil, error);
-                                 }
-                             }];
-                         } else {
-                             [asset exportToURL:mediaURL
-                                      targetUTI:assetUTI
-                              maximumResolution:maximumResolution
-                               stripGeoLocation:stripGeoLocation
-                                    synchronous:true
-                                 successHandler:^(CGSize resultingSize) {
-                                     [self createMediaForPost:postObjectID
-                                                     mediaURL:mediaURL
-                                            mediaThumbnailURL:mediaThumbnailURL
-                                                    mediaType:mediaType
-                                                    mediaSize:resultingSize
-                                                   completion:completion];
-                                 }
-                                   errorHandler:^(NSError *error) {
-                                       if (completion){
-                                           completion(nil, error);
-                                       }
-                                   }];
-                         }
-                     }
-                       errorHandler:^(NSError *error) {
-                           if (completion){
-                               completion(nil, error);
-                           }
-                       }];
-    }];
 }
 
-- (void) createMediaForPost:(NSManagedObjectID *)postObjectID
-                   mediaURL:(NSURL *)mediaURL
-          mediaThumbnailURL:(NSURL *)mediaThumbnailURL
-                  mediaType:(MediaType)mediaType
-                  mediaSize:(CGSize)mediaSize
-                 completion:(void (^)(Media *media, NSError *error))completion
-{
+/**
+ Generate a thumbnail image for the Media asset so that consumers of the absoluteThumbnailLocalURL property
+ will have an image ready to load, without using the async methods provided via MediaThumbnailService.
  
-    [self.managedObjectContext performBlock:^{
-        AbstractPost *post = (AbstractPost *)[self.managedObjectContext objectWithID:postObjectID];
-        Media *media = [self newMediaForPost:post];
-        media.postID = post.postID;
-        media.filename = [mediaURL lastPathComponent];
-        media.absoluteLocalURL = [mediaURL path];
-        media.absoluteThumbnailLocalURL = [mediaThumbnailURL path];
-        NSNumber * fileSize;
-        if ([mediaURL getResourceValue:&fileSize forKey:NSURLFileSizeKey error:nil]) {
-            media.filesize = @([fileSize longLongValue] / 1024);
-        } else {
-            media.filesize = 0;
-        }
-        media.width = @(mediaSize.width);
-        media.height = @(mediaSize.height);
-        media.mediaType = mediaType;
-        //make sure that we only return when object is properly created and saved
-        [[ContextManager sharedInstance] saveContext:self.managedObjectContext withCompletionBlock:^{
-            if (completion) {
-                completion(media, nil);
-            }
-        }];
-    }];
+ This is primarily used as a placeholder image throughout the code-base, particulary within the editors.
+ 
+ Note: Ideally we wouldn't need this at all, but the synchronous usage of absoluteThumbnailLocalURL across the code-base
+       to load a thumbnail image is relied on quite heavily. In the future, transitioning to asynchronous thumbnail loading
+       via the new thumbnail service methods is much preferred, but would indeed take a good bit of refactoring away from
+       using absoluteThumbnailLocalURL.
+*/
+- (void)exportPlaceholderThumbnailForMedia:(Media *)media completion:(void (^)(NSURL *thumbnailURL))thumbnailCallback
+{
+    [self.thumbnailService thumbnailURLForMedia:media
+                                  preferredSize:CGSizeZero
+                                   onCompletion:^(NSURL *url) {
+                                       [self.managedObjectContext performBlock:^{
+                                           if (url) {
+                                               // Set the absoluteThumbnailLocalURL with the generated thumbnail's URL.
+                                               media.absoluteThumbnailLocalURL = url;
+                                               [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
+                                           }
+                                           if (thumbnailCallback) {
+                                               thumbnailCallback(url);
+                                           }
+                                       }];
+                                   }
+                                        onError:^(NSError *error) {
+                                            DDLogError(@"Error occurred exporting placeholder thumbnail: %@", error);
+                                        }];
 }
+
+- (BOOL)supportsNewMediaExports
+{
+    return [Feature enabled:FeatureFlagNewMediaExports];
+}
+
+#pragma mark - Uploading media
 
 - (void)uploadMedia:(Media *)media
            progress:(NSProgress **)progress
-           success:(void (^)())success
-           failure:(void (^)(NSError *error))failure
+            success:(void (^)())success
+            failure:(void (^)(NSError *error))failure
 {
-    id<MediaServiceRemote> remote = [self remoteForBlog:media.blog];
+    Blog *blog = media.blog;
+    id<MediaServiceRemote> remote = [self remoteForBlog:blog];
     RemoteMedia *remoteMedia = [self remoteMediaFromMedia:media];
 
     // Even though jpeg is a valid extension, use jpg instead for the widest possible
@@ -204,6 +223,8 @@
     NSManagedObjectID *mediaObjectID = media.objectID;
     void (^successBlock)(RemoteMedia *media) = ^(RemoteMedia *media) {
         [self.managedObjectContext performBlock:^{
+            [WPAppAnalytics track:WPAnalyticsStatMediaServiceUploadSuccessful withBlog:blog];
+
             NSError * error = nil;
             Media *mediaInContext = (Media *)[self.managedObjectContext existingObjectWithID:mediaObjectID error:&error];
             if (!mediaInContext){
@@ -213,7 +234,7 @@
                 }
                 return;
             }
-            
+
             [self updateMedia:mediaInContext withRemoteMedia:media];
             mediaInContext.remoteStatus = MediaRemoteStatusSync;
             [[ContextManager sharedInstance] saveContext:self.managedObjectContext withCompletionBlock:^{
@@ -225,22 +246,41 @@
     };
     void (^failureBlock)(NSError *error) = ^(NSError *error) {
         [self.managedObjectContext performBlock:^{
+            if (error) {
+                [self trackUploadError:error];
+            }
+
             Media *mediaInContext = (Media *)[self.managedObjectContext existingObjectWithID:mediaObjectID error:nil];
             if (mediaInContext) {
                 mediaInContext.remoteStatus = MediaRemoteStatusFailed;
                 [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
             }
             if (failure) {
-                failure([self translateMediaUploadError:error]);
+                failure([self customMediaUploadError:error remote:remote]);
             }
         }];
     };
-    
-    [remote createMedia:remoteMedia
+
+    [WPAppAnalytics track:WPAnalyticsStatMediaServiceUploadStarted withBlog:blog];
+
+    [remote uploadMedia:remoteMedia
                progress:progress
                 success:successBlock
                 failure:failureBlock];
 }
+
+#pragma mark - Private helpers
+
+- (void)trackUploadError:(NSError *)error
+{
+    if (error.code == NSURLErrorCancelled) {
+        [WPAppAnalytics track:WPAnalyticsStatMediaServiceUploadCanceled];
+    } else {
+        [WPAppAnalytics track:WPAnalyticsStatMediaServiceUploadFailed error:error];
+    }
+}
+
+#pragma mark - Updating media
 
 - (void)updateMedia:(Media *)media
             success:(void (^)())success
@@ -276,7 +316,7 @@
                 [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
             }
             if (failure) {
-                failure([self translateMediaUploadError:error]);
+                failure(error);
             }
         }];
     };
@@ -286,9 +326,9 @@
                 failure:failureBlock];
 }
 
-- (void)updateMultipleMedia:(NSArray<Media *> *)mediaObjects
-             overallSuccess:(void (^)())overallSuccess
-                    failure:(void (^)(NSError *error))failure
+- (void)updateMedia:(NSArray<Media *> *)mediaObjects
+     overallSuccess:(void (^)())overallSuccess
+            failure:(void (^)(NSError *error))failure
 {
     if (mediaObjects.count == 0) {
         if (overallSuccess) {
@@ -312,7 +352,7 @@
                 } else if (failure && failedOperations == totalOperations.unsignedIntegerValue) {
                     NSError *error = [NSError errorWithDomain:WordPressComRestApiErrorDomain
                                                          code:WordPressComRestApiErrorUnknown
-                                                     userInfo:@{NSLocalizedDescriptionKey : NSLocalizedString(@"An error occurred when attempting to attach remote media to the post.", @"Error recorded when all of the media associated with a post fail to be attached to the post on the server.")}];
+                                                     userInfo:@{NSLocalizedDescriptionKey : NSLocalizedString(@"An error occurred when attempting to attach uploaded media to the post.", @"Error recorded when all of the media associated with a post fail to be attached to the post on the server.")}];
                     failure(error);
                 }
             }
@@ -327,28 +367,127 @@
             individualOperationCompletion(false);
         }];
     }
-
 }
 
-- (NSError *)translateMediaUploadError:(NSError *)error {
-    NSError *newError = error;
-    if (error.domain == WPXMLRPCFaultErrorDomain) {
-        NSString *errorMessage = [error localizedDescription];
-        NSInteger errorCode = error.code;
-        NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithDictionary:error.userInfo];
-        switch (error.code) {
-            case 500:{
-                errorMessage = NSLocalizedString(@"Your site does not support this media file format.", @"Message to show to user when media upload failed because server doesn't support media type");
-            } break;
-            case 401:{
-                errorMessage = NSLocalizedString(@"Your site is out of space for media uploads.", @"Message to show to user when media upload failed because user doesn't have enough space on quota/disk");                
-            } break;
+#pragma mark - Private helpers
+
+- (NSError *)customMediaUploadError:(NSError *)error remote:(id <MediaServiceRemote>)remote {
+    NSString *customErrorMessage = nil;
+    if ([remote isKindOfClass:[MediaServiceRemoteXMLRPC class]]) {
+        // For self-hosted sites we should generally pass on the raw system/network error message.
+        // Which should help debug issues with a self-hosted site.
+        if ([error.domain isEqualToString:WPXMLRPCFaultErrorDomain]) {
+            switch (error.code) {
+                case 500:{
+                    customErrorMessage = NSLocalizedString(@"Your site does not support this media file format.", @"Message to show to user when media upload failed because server doesn't support media type");
+                } break;
+                case 401:{
+                    customErrorMessage = NSLocalizedString(@"Your site is out of storage space for media uploads.", @"Message to show to user when media upload failed because user doesn't have enough space on quota/disk");
+                } break;
+            }
         }
-        userInfo[NSLocalizedDescriptionKey] = errorMessage;
-        newError = [[NSError alloc] initWithDomain:WPXMLRPCFaultErrorDomain code:errorCode userInfo:userInfo];
+    } else if ([remote isKindOfClass:[MediaServiceRemoteREST class]]) {
+        // For WPCom/Jetpack sites and NSURLErrors we should use a more general error message to encourage a user to try again,
+        // rather than raw NSURLError messaging.
+        if ([error.domain isEqualToString:NSURLErrorDomain]) {
+            switch (error.code) {
+                case NSURLErrorUnknown:
+                    // Unknown error, encourage the user to try again
+                    // Note: if support requests show up with this error message we can rule out known NSURLError codes
+                    customErrorMessage = NSLocalizedString(@"An unknown error occurred. Please try again.", @"Error message shown when a media upload fails for unknown reason and the user should try again.");
+                    break;
+                case NSURLErrorNetworkConnectionLost:
+                case NSURLErrorNotConnectedToInternet:
+                    // Clear lack of device internet connection, notify the user
+                    customErrorMessage = NSLocalizedString(@"The internet connection appears to be offline.", @"Error message shown when a media upload fails because the user isn't connected to the internet.");
+                    break;
+                default:
+                    // Default NSURL error messaging, probably server-side, encourage user to try again
+                    customErrorMessage = NSLocalizedString(@"Something went wrong. Please try again.", @"Error message shown when a media upload fails for a general network issue and the user should try again in a moment.");
+                    break;
+            }
+        }
     }
-    return newError;
+    if (customErrorMessage) {
+        NSMutableDictionary *userInfo = [error.userInfo mutableCopy];
+        userInfo[NSLocalizedDescriptionKey] = customErrorMessage;
+        error = [[NSError alloc] initWithDomain:error.domain code:error.code userInfo:userInfo];
+    }
+    return error;
 }
+
+#pragma mark - Deleting media
+
+- (void)deleteMedia:(nonnull Media *)media
+            success:(nullable void (^)())success
+            failure:(nullable void (^)(NSError * _Nonnull error))failure
+{
+    id<MediaServiceRemote> remote = [self remoteForBlog:media.blog];
+    RemoteMedia *remoteMedia = [self remoteMediaFromMedia:media];
+    NSManagedObjectID *mediaObjectID = media.objectID;
+
+    void (^successBlock)() = ^() {
+        [self.managedObjectContext performBlock:^{
+            Media *mediaInContext = (Media *)[self.managedObjectContext existingObjectWithID:mediaObjectID error:nil];
+            [self.managedObjectContext deleteObject:mediaInContext];
+            [[ContextManager sharedInstance] saveContext:self.managedObjectContext
+                                     withCompletionBlock:^{
+                                         if (success) {
+                                             success();
+                                         }
+                                     }];
+        }];
+    };
+    
+    [remote deleteMedia:remoteMedia
+                success:successBlock
+                failure:failure];
+}
+
+- (void)deleteMedia:(nonnull NSArray<Media *> *)mediaObjects
+           progress:(nullable void (^)(NSProgress *_Nonnull progress))progress
+            success:(nullable void (^)())success
+            failure:(nullable void (^)())failure
+{
+    if (mediaObjects.count == 0) {
+        if (success) {
+            success();
+        }
+        return;
+    }
+
+    NSProgress *currentProgress = [NSProgress progressWithTotalUnitCount:mediaObjects.count];
+
+    dispatch_group_t group = dispatch_group_create();
+
+    [mediaObjects enumerateObjectsUsingBlock:^(Media *media, NSUInteger idx, BOOL *stop) {
+        dispatch_group_enter(group);
+        [self deleteMedia:media success:^{
+            currentProgress.completedUnitCount++;
+            if (progress) {
+                progress(currentProgress);
+            }
+            dispatch_group_leave(group);
+        } failure:^(NSError *error) {
+            dispatch_group_leave(group);
+        }];
+    }];
+
+    // After all the operations have succeeded (or failed)
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        if (currentProgress.completedUnitCount >= currentProgress.totalUnitCount) {
+            if (success) {
+                success();
+            }
+        } else {
+            if (failure) {
+                failure();
+            }
+        }
+    });
+}
+
+#pragma mark - Getting media
 
 - (void) getMediaWithID:(NSNumber *) mediaID inBlog:(Blog *) blog
             withSuccess:(void (^)(Media *media))success
@@ -363,9 +502,9 @@
            if (!blog) {
                return;
            }
-           Media *media = [self findMediaWithID:remoteMedia.mediaID inBlog:blog];
+           Media *media = [Media existingMediaWithMediaID:remoteMedia.mediaID inBlog:blog];
            if (!media) {
-               media = [self newMediaForBlog:blog];
+               media = [Media makeMediaWithBlog:blog];
            }
            [self updateMedia:media withRemoteMedia:remoteMedia];
            if (success){
@@ -383,35 +522,21 @@
     }];
 }
 
-- (Media *)findMediaWithID:(NSNumber *)mediaID inBlog:(Blog *)blog
-{
-    NSSet *media = [blog.media filteredSetUsingPredicate:[NSPredicate predicateWithFormat:@"mediaID = %@", mediaID]];
-    return [media anyObject];
-}
-
 - (void)getMediaURLFromVideoPressID:(NSString *)videoPressID
                              inBlog:(Blog *)blog
                             success:(void (^)(NSString *videoURL, NSString *posterURL))success
                             failure:(void (^)(NSError *error))failure
 {
-    NSString *entityName = NSStringFromClass([Media class]);
-    NSFetchRequest *request = [NSFetchRequest fetchRequestWithEntityName:entityName];
-    request.predicate = [NSPredicate predicateWithFormat:@"videopressGUID = %@", videoPressID];
-    NSError *error = nil;
-    Media *media = [[self.managedObjectContext executeFetchRequest:request error:&error] firstObject];
-    if (media) {
-        NSString  *posterURL = media.absoluteThumbnailLocalURL;
-        if (!posterURL) {
-            posterURL = media.remoteThumbnailURL;
-        }
+    id<MediaServiceRemote> remote = [self remoteForBlog:blog];
+    [remote getVideoURLFromVideoPressID:videoPressID success:^(NSURL *videoURL, NSURL *posterURL) {
         if (success) {
-            success(media.remoteURL, posterURL);
+            success(videoURL.absoluteString, posterURL.absoluteString);
         }
-    } else {
+    } failure:^(NSError * error) {
         if (failure) {
             failure(error);
         }
-    }
+    }];
 }
 
 - (void)syncMediaLibraryForBlog:(Blog *)blog
@@ -435,92 +560,6 @@
                            }];
 }
 
-+ (NSOperationQueue *)queueForResizeMediaOperations {
-    static NSOperationQueue * _queueForResizeMediaOperations = nil;
-    static dispatch_once_t _onceToken;
-    dispatch_once(&_onceToken, ^{
-        _queueForResizeMediaOperations = [[NSOperationQueue alloc] init];
-        _queueForResizeMediaOperations.name = @"MediaService-ResizeMediaOperation";
-        _queueForResizeMediaOperations.maxConcurrentOperationCount = 1;
-    });
-    
-    return _queueForResizeMediaOperations;
-}
-
-- (void)thumbnailForMedia:(Media *)mediaInRandomContext
-                 size:(CGSize)size
-              success:(void (^)(UIImage *image))success
-              failure:(void (^)(NSError *error))failure
-{
-    NSManagedObjectID *mediaID = [mediaInRandomContext objectID];
-    [self.managedObjectContext performBlock:^{
-        Media *media = (Media *)[self.managedObjectContext objectWithID:mediaID];
-        BOOL isPrivate = media.blog.isPrivate;
-        NSString *pathForFile;
-        if (media.mediaType == MediaTypeImage) {
-            pathForFile = media.absoluteThumbnailLocalURL;
-        } else if (media.mediaType == MediaTypeVideo) {
-            pathForFile = media.absoluteThumbnailLocalURL;
-        }
-        if (pathForFile && [[NSFileManager defaultManager] fileExistsAtPath:pathForFile isDirectory:nil]) {
-            [[[self class] queueForResizeMediaOperations] addOperationWithBlock:^{
-                UIImage *image = [UIImage imageWithContentsOfFile:pathForFile];
-                if (success) {
-                    success(image);
-                }
-            }];
-            return;
-        }
-        NSURL *remoteURL = nil;
-        if (media.mediaType == MediaTypeVideo) {
-            remoteURL = [NSURL URLWithString:media.remoteThumbnailURL];
-        } else if (media.mediaType == MediaTypeImage) {
-            NSString *remote = media.remoteURL;
-            remoteURL = [NSURL URLWithString:remote];
-            if (!media.blog.isPrivate) {
-                remoteURL = [PhotonImageURLHelper photonURLWithSize:size forImageURL:remoteURL];
-            } else {
-                remoteURL = [WPImageURLHelper imageURLWithSize:size forImageURL:remoteURL];
-            }
-
-        }
-        if (!remoteURL) {
-            if (failure) {
-                failure(nil);
-            }
-            return;
-        }
-        WPImageSource *imageSource = [WPImageSource sharedSource];
-        void (^successBlock)(UIImage *) = ^(UIImage *image) {
-            [self.managedObjectContext performBlock:^{
-                NSURL *fileURL = [self urlForMediaWithFilename:[self pathForThumbnailOfFile:media.filename]
-                                                  andExtension:[self extensionForUTI:(__bridge NSString*)kUTTypeJPEG]];
-                media.absoluteThumbnailLocalURL = [fileURL path];
-                [self.managedObjectContext save:nil];
-                [[[self class] queueForResizeMediaOperations] addOperationWithBlock:^{                    
-                    [image writeToURL:fileURL type:(__bridge NSString*)kUTTypeJPEG compressionQuality:0.9 metadata:nil error:nil];
-                    if (success) {
-                        success(image);
-                    }
-                }];
-            }];
-        };
-        
-        if (isPrivate) {
-            AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:self.managedObjectContext];
-            NSString *authToken = [[accountService defaultWordPressComAccount] authToken];
-            [imageSource downloadImageForURL:remoteURL
-                                   authToken:authToken
-                                 withSuccess:successBlock
-                                     failure:failure];
-        } else {
-            [imageSource downloadImageForURL:remoteURL
-                                 withSuccess:successBlock
-                                     failure:failure];
-        }
-    }];
-}
-
 - (NSInteger)getMediaLibraryCountForBlog:(Blog *)blog
                            forMediaTypes:(NSSet *)mediaTypes
 {
@@ -530,6 +569,126 @@
     NSError *error;
     NSArray *mediaAssets = [self.managedObjectContext executeFetchRequest:request error:&error];
     return mediaAssets.count;
+}
+
+- (void)getMediaLibraryServerCountForBlog:(Blog *)blog
+                            forMediaTypes:(NSSet *)mediaTypes
+                                  success:(void (^)(NSInteger count))success
+                                  failure:(void (^)(NSError *error))failure
+{
+    NSMutableSet *remainingMediaTypes = [NSMutableSet setWithSet:mediaTypes];
+    NSNumber *currentMediaType = [mediaTypes anyObject];
+    NSString *currentMimeType = nil;
+    if (currentMediaType != nil) {
+        currentMimeType = [self mimeTypeForMediaType:currentMediaType];
+        [remainingMediaTypes removeObject:currentMediaType];
+    }
+    id<MediaServiceRemote> remote = [self remoteForBlog:blog];
+    [remote getMediaLibraryCountForType:currentMimeType
+                            withSuccess:^(NSInteger count) {
+        if( remainingMediaTypes.count == 0) {
+            if (success) {
+                success(count);
+            }
+        } else {
+            [self getMediaLibraryServerCountForBlog:blog forMediaTypes:remainingMediaTypes success:^(NSInteger otherCount) {
+                if (success) {
+                    success(count + otherCount);
+                }
+            } failure:^(NSError * _Nonnull error) {
+                if (failure) {
+                    failure(error);
+                }
+            }];
+        }
+    } failure:^(NSError *error) {
+        if (failure) {
+            failure(error);
+        }
+    }];
+}
+
+#pragma mark - Thumbnails
+
+- (void)thumbnailFileURLForMedia:(Media *)mediaInRandomContext
+                   preferredSize:(CGSize)preferredSize
+                      completion:(void (^)(NSURL * _Nullable, NSError * _Nullable))completion
+{
+    NSManagedObjectID *mediaID = [mediaInRandomContext objectID];
+    [self.managedObjectContext performBlock:^{
+        /*
+         When using the new Media export services, return the URL via the MediaThumbnailService.
+         Otherwise, use the original implementation's `absoluteThumbnailLocalURL`.
+         */
+        Media *media = (Media *)[self.managedObjectContext objectWithID: mediaID];
+        if ([self supportsNewMediaExports]) {
+            [self.thumbnailService thumbnailURLForMedia:media
+                                          preferredSize:preferredSize
+                                           onCompletion:^(NSURL *url) {
+                                               completion(url, nil);
+                                           }
+                                                onError:^(NSError *error) {
+                                                    completion(nil, error);
+                                                }];
+        } else {
+            completion(media.absoluteThumbnailLocalURL, nil);
+        }
+    }];
+}
+
+- (void)thumbnailImageForMedia:(nonnull Media *)mediaInRandomContext
+                 preferredSize:(CGSize)preferredSize
+                    completion:(void (^)(UIImage * _Nullable image, NSError * _Nullable error))completion
+{
+    NSManagedObjectID *mediaID = [mediaInRandomContext objectID];
+    [self.managedObjectContext performBlock:^{
+        /*
+         When using the new Media export services, generate a thumbnail image from the URL
+         of the MediaThumbnailService.
+         Otherwise, use the legacy category method `imageForMedia:`.
+         */
+        Media *media = (Media *)[self.managedObjectContext objectWithID: mediaID];
+        if ([self supportsNewMediaExports]) {
+            [self.thumbnailService thumbnailURLForMedia:media
+                                          preferredSize:preferredSize
+                                           onCompletion:^(NSURL *url) {
+                                               dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),^{
+                                                   UIImage *image = [UIImage imageWithContentsOfFile:url.path];
+                                                   [self.managedObjectContext performBlock:^{
+                                                       completion(image, nil);
+                                                   }];
+                                               });
+                                           }
+                                                onError:^(NSError *error) {
+                                                    completion(nil, error);
+                                                }];
+        } else {
+            [self imageForMedia:mediaInRandomContext
+                           size:preferredSize
+                        success:^(UIImage *image) {
+                            completion(image, nil);
+                        } failure:^(NSError *error) {
+                            completion(nil, error);
+                        }];
+        }
+    }];
+}
+
+- (MediaThumbnailService *)thumbnailService
+{
+    if (!_thumbnailService) {
+        _thumbnailService = [[MediaThumbnailService alloc] initWithManagedObjectContext:self.managedObjectContext];
+    }
+    return _thumbnailService;
+}
+
+#pragma mark - Private helpers
+
+- (NSString *)mimeTypeForMediaType:(NSNumber *)mediaType
+{
+    MediaType filter = (MediaType)[mediaType intValue];
+    NSString *mimeType = [Media stringFromMediaType:filter];
+    return mimeType;
 }
 
 - (NSPredicate *)predicateForMediaTypes:(NSSet *)mediaTypes blog:(Blog *)blog
@@ -552,101 +711,7 @@
     return predicate;
 }
 
-#pragma mark - Private
-
-#pragma mark - Media Creation
-
-- (Media *)newMedia
-{
-    Media *media = [NSEntityDescription insertNewObjectForEntityForName:@"Media" inManagedObjectContext:self.managedObjectContext];
-    media.creationDate = [NSDate date];
-    media.mediaID = @0;
-    // We only support images for now, so let's set the default here
-    media.mediaType = MediaTypeImage;
-    return media;
-}
-
-- (Media *)newMediaForBlog:(Blog *)blog
-{
-    Media *media = [self newMedia];
-    media.blog = blog;
-    return media;
-}
-
-- (Media *)newMediaForPost:(AbstractPost *)post
-{
-    Media *media = [self newMediaForBlog:post.blog];
-    [media addPostsObject:post];
-    return media;
-}
-
 #pragma mark - Media helpers
-
-- (NSString *)extensionForUTI:(NSString *)UTI {
-    return (__bridge_transfer NSString *)UTTypeCopyPreferredTagWithClass((__bridge CFStringRef)UTI, kUTTagClassFilenameExtension);
-}
-
-static NSString * const MediaDirectory = @"Media";
-
-+ (NSURL *)urlForMediaDirectory
-{
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSURL * documentsURL = [[fileManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] firstObject];
-    NSURL * mediaURL = [documentsURL URLByAppendingPathComponent:MediaDirectory isDirectory:YES];
-    NSError *error;
-    if (![mediaURL checkResourceIsReachableAndReturnError:&error]) {
-        if (![fileManager createDirectoryAtURL:mediaURL withIntermediateDirectories:YES attributes:nil error:&error]){
-            DDLogError(@"%@", [error localizedDescription]);
-            return nil;
-        }
-        [mediaURL setResourceValue:@(NO) forKey:NSURLIsExcludedFromBackupKey error:nil];
-    }
-    
-    return mediaURL;
-}
-
-- (NSURL *)urlForMediaWithFilename:(NSString *)filename andExtension:(NSString *)extension
-{
-    NSURL *mediaDirectoryURL = [[self class] urlForMediaDirectory];
-    NSString *basename = [[filename stringByDeletingPathExtension] lowercaseString];
-    NSURL *resultURL = [mediaDirectoryURL URLByAppendingPathComponent:basename];
-    resultURL = [resultURL URLByAppendingPathExtension:extension];
-    NSUInteger index = 1;
-    while ([resultURL checkResourceIsReachableAndReturnError:nil]) {
-        NSString *alternativeFilename = [NSString stringWithFormat:@"%@-%d.%@", basename, index, extension];
-        resultURL = [mediaDirectoryURL URLByAppendingPathComponent:alternativeFilename];
-        index++;
-    }
-    return resultURL;
-}
-
-- (NSString *)pathForThumbnailOfFile:(NSString *)filename
-{
-    NSString *extension = [filename pathExtension];
-    NSString *fileWithoutExtension = [filename stringByDeletingPathExtension];
-    NSString *thumbnailPath = [fileWithoutExtension stringByAppendingString:@"-thumbnail"];
-    thumbnailPath = [thumbnailPath stringByAppendingPathExtension:extension];
-    return thumbnailPath;
-}
-
-- (NSString *)mimeTypeForFilename:(NSString *)filename
-{
-    if (!filename || ![filename pathExtension]) {
-        return @"application/octet-stream";
-    }
-    // Get the UTI from the file's extension:
-    CFStringRef pathExtension = (__bridge_retained CFStringRef)[filename pathExtension];
-    CFStringRef type = UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, pathExtension, NULL);
-    CFRelease(pathExtension);
-
-    // The UTI can be converted to a mime type:
-    NSString *mimeType = (__bridge_transfer NSString *)UTTypeCopyPreferredTagWithClass(type, kUTTagClassMIMEType);
-    if (type != NULL) {
-        CFRelease(type);
-    }
-
-    return mimeType;
-}
 
 - (id<MediaServiceRemote>)remoteForBlog:(Blog *)blog
 {
@@ -671,9 +736,9 @@ static NSString * const MediaDirectory = @"Media";
     NSMutableSet *mediaToKeep = [NSMutableSet set];
     for (RemoteMedia *remote in media) {
         @autoreleasepool {
-            Media *local = [self findMediaWithID:remote.mediaID inBlog:blog];
+            Media *local = [Media existingMediaWithMediaID:remote.mediaID inBlog:blog];
             if (!local) {
-                local = [self newMediaForBlog:blog];
+                local = [Media makeMediaWithBlog:blog];
                 local.remoteStatus = MediaRemoteStatusSync;
             }
             [self updateMedia:local withRemoteMedia:remote];
@@ -701,9 +766,15 @@ static NSString * const MediaDirectory = @"Media";
 {
     media.mediaID =  remoteMedia.mediaID;
     media.remoteURL = [remoteMedia.url absoluteString];
-    media.creationDate = remoteMedia.date;
+    if (remoteMedia.date) {
+        media.creationDate = remoteMedia.date;
+    }
     media.filename = remoteMedia.file;
-    [media mediaTypeFromUrl:[remoteMedia extension]];
+    if (remoteMedia.mimeType.length > 0) {
+        [media setMediaTypeForMimeType:remoteMedia.mimeType];
+    } else if (remoteMedia.extension.length > 0) {
+        [media setMediaTypeForExtension:remoteMedia.extension];
+    }
     media.title = remoteMedia.title;
     media.caption = remoteMedia.caption;
     media.desc = remoteMedia.descriptionText;
@@ -723,90 +794,18 @@ static NSString * const MediaDirectory = @"Media";
     remoteMedia.url = [NSURL URLWithString:media.remoteURL];
     remoteMedia.date = media.creationDate;
     remoteMedia.file = media.filename;
-    remoteMedia.extension = [media.filename pathExtension] ? :@"unknown";
+    remoteMedia.extension = [media fileExtension] ?: @"unknown";
     remoteMedia.title = media.title;
     remoteMedia.caption = media.caption;
     remoteMedia.descriptionText = media.desc;
     remoteMedia.height = media.height;
     remoteMedia.width = media.width;
     remoteMedia.localURL = media.absoluteLocalURL;
-    remoteMedia.mimeType = [self mimeTypeForFilename:media.absoluteLocalURL];
+    remoteMedia.mimeType = [media mimeType];
 	remoteMedia.videopressGUID = media.videopressGUID;
     remoteMedia.remoteThumbnailURL = media.remoteThumbnailURL;
     remoteMedia.postID = media.postID;
     return remoteMedia;
-}
-
-#pragma mark - Media cleanup
-
-+ (void)cleanUnusedMediaFileFromTmpDir
-{
-    DDLogInfo(@"%@ %@", self, NSStringFromSelector(_cmd));
-
-    NSManagedObjectContext *context = [[ContextManager sharedInstance] newDerivedContext];
-    [context performBlock:^{
-
-        // Fetch Media URL's and return them as Dictionary Results:
-        // This way we'll avoid any CoreData Faulting Exception due to deletions performed on another context
-        NSString *localUrlProperty = NSStringFromSelector(@selector(localURL));
-        NSString *localThumbUrlProperty = NSStringFromSelector(@selector(localThumbnailURL));
-
-        NSFetchRequest *fetchRequest = [[NSFetchRequest alloc] init];
-        fetchRequest.entity = [NSEntityDescription entityForName:NSStringFromClass([Media class]) inManagedObjectContext:context];
-        fetchRequest.predicate = [NSPredicate predicateWithFormat:@"blog != NULL"];
-
-        fetchRequest.propertiesToFetch = @[ localUrlProperty, localThumbUrlProperty ];
-        fetchRequest.resultType = NSDictionaryResultType;
-
-        NSError *error = nil;
-        NSArray *mediaObjectsToKeep = [context executeFetchRequest:fetchRequest error:&error];
-
-        if (error) {
-            DDLogError(@"Error cleaning up tmp files: %@", error.localizedDescription);
-            return;
-        }
-
-        // Get a references to media files linked in a post
-        DDLogInfo(@"%i media items to check for cleanup", mediaObjectsToKeep.count);
-        NSString *documentsDirectory    = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-        NSMutableSet *pathsToKeep       = [NSMutableSet set];
-        for (NSDictionary *mediaDict in mediaObjectsToKeep) {
-            NSString *path = mediaDict[localUrlProperty];
-            if (path) {
-                NSString *absolutePath = [documentsDirectory stringByAppendingPathComponent:path];
-                [pathsToKeep addObject:absolutePath];
-            }
-
-            NSString *thumbPath = mediaDict[localThumbUrlProperty];
-            if (thumbPath) {
-                NSString *absoluteThumbPath = [documentsDirectory stringByAppendingPathComponent:thumbPath];
-                [pathsToKeep addObject:absoluteThumbPath];
-            }
-        }
-
-        // Search for media extension files within the Media Folder
-        NSSet *mediaExtensions = [NSSet setWithObjects:@"jpg", @"jpeg", @"png", @"gif", @"mov", @"avi", @"mp4", nil];
-
-        NSArray *contentsOfDir = [[NSFileManager defaultManager] contentsOfDirectoryAtURL:[self urlForMediaDirectory]
-                                                               includingPropertiesForKeys:nil
-                                                                                  options:NSDirectoryEnumerationSkipsHiddenFiles
-                                                                                    error:nil];
-
-        for (NSURL *currentURL in contentsOfDir) {
-            NSString *filepath = [[currentURL URLByResolvingSymlinksInPath] path];
-            NSString *extension = filepath.pathExtension.lowercaseString;
-            if (![mediaExtensions containsObject:extension] ||
-                [pathsToKeep containsObject:filepath]) {
-                continue;
-            }
-
-            NSError *nukeError = nil;
-            if ([[NSFileManager defaultManager] fileExistsAtPath:filepath] &&
-                [[NSFileManager defaultManager] removeItemAtPath:filepath error:&nukeError] == NO) {
-                DDLogError(@"Error [%@] while nuking unused Media at path [%@]", nukeError.localizedDescription, filepath);
-            }
-        }
-    }];
 }
 
 @end

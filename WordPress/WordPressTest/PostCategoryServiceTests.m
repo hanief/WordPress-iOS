@@ -3,10 +3,13 @@
 #import "Blog.h"
 #import "PostCategory.h"
 #import "PostCategoryService.h"
-#import "TaxonomyServiceRemoteREST.h"
-#import "RemoteTaxonomyPaging.h"
-#import "RemotePostCategory.h"
-#import "WordPress-Swift.h"
+#import "TestContextManager.h"
+#import "WordPressTest-Swift.h"
+@import WordPressKit;
+
+@interface WPAccount ()
+@property (nonatomic, readwrite) WordPressComRestApi *wordPressComRestApi;
+@end
 
 @interface PostCategoryServiceForStubbing : PostCategoryService
 
@@ -25,6 +28,7 @@
 
 @interface PostCategoryServiceTests : XCTestCase
 
+@property (nonatomic, strong) TestContextManager *manager;
 @property (nonatomic, strong) Blog *blog;
 @property (nonatomic, strong) PostCategoryServiceForStubbing *service;
 
@@ -35,20 +39,16 @@
 - (void)setUp
 {
     [super setUp];
-    
+
+    self.manager = [TestContextManager new];
     WordPressComRestApi *api = OCMStrictClassMock([WordPressComRestApi class]);
-    
-    Blog *blog = OCMStrictClassMock([Blog class]);
-    
-    OCMStub([blog wordPressComRestApi]).andReturn(api);
-    OCMStub([blog dotComID]).andReturn(@1);
-    OCMStub([blog objectID]).andReturn(nil);
-    
+
+    Blog *blog = [ModelTestHelper insertDotComBlogWithContext:self.manager.mainContext];
+    blog.account.wordPressComRestApi = api;
+    blog.dotComID = @1;
     self.blog = blog;
-    
-    NSManagedObjectContext *context = OCMStrictClassMock([NSManagedObjectContext class]);
-    
-    PostCategoryServiceForStubbing *service = [[PostCategoryServiceForStubbing alloc] initWithManagedObjectContext:context];
+
+    PostCategoryServiceForStubbing *service = [[PostCategoryServiceForStubbing alloc] initWithManagedObjectContext:self.manager.mainContext];
     
     TaxonomyServiceRemoteREST *remoteService = OCMStrictClassMock([TaxonomyServiceRemoteREST class]);
     service.remoteForStubbing = remoteService;
@@ -63,6 +63,7 @@
     
     self.blog = nil;
     self.service = nil;
+    self.manager = nil;
 }
 
 - (void)testThatSyncCategoriesWorks

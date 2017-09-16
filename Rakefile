@@ -1,4 +1,4 @@
-SWIFTLINT_VERSION="0.12.0"
+SWIFTLINT_VERSION="0.15.0"
 XCODE_WORKSPACE="WordPress.xcworkspace"
 XCODE_SCHEME="WordPress"
 XCODE_CONFIGURATION="Debug"
@@ -128,6 +128,21 @@ task :build => [:dependencies] do
   xcodebuild(:build)
 end
 
+desc "Profile build #{XCODE_SCHEME}"
+task :buildprofile => [:dependencies] do
+  ENV["verbose"] = "1"
+  xcodebuild(:build, "OTHER_SWIFT_FLAGS='-Xfrontend -debug-time-compilation -Xfrontend -debug-time-expression-type-checking'")
+end
+
+task :timed_build => [:clean] do
+  require 'benchmark'
+  time = Benchmark.measure do
+    Rake::Task["build"].invoke
+  end
+  puts "CPU Time: #{time.total}"
+  puts "Wall Time: #{time.real}"
+end
+
 desc "Run test suite"
 task :test => [:dependencies] do
   xcodebuild(:build, :test)
@@ -154,7 +169,7 @@ namespace :git do
   hooks = %w[pre-commit post-checkout post-merge]
 
   desc "Install git hooks"
-  task :instal_hooks do
+  task :install_hooks do
     hooks.each do |hook|
       target = hook_target(hook)
       source = hook_source(hook)
@@ -260,7 +275,7 @@ end
 
 def swiftlint_needs_install
   return true unless File.exist?(swiftlint_bin)
-  installed_version = `#{swiftlint_bin} version`.chomp
+  installed_version = `"#{swiftlint_bin}" version`.chomp
   return (installed_version != SWIFTLINT_VERSION)
 end
 

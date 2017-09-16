@@ -2,12 +2,11 @@
 #import "AccountService.h"
 #import "ContextManager.h"
 #import "SourcePostAttribution.h"
-#import "NSString+Util.h"
-#import "NSString+Helpers.h"
-#import "NSString+XMLExtensions.h"
 #import "WordPressAppDelegate.h"
 #import "WPAccount.h"
 #import "WPAvatarSource.h"
+#import <WordPressShared/NSString+Util.h>
+#import <WordPressShared/NSString+XMLExtensions.h>
 #import "WordPress-Swift.h"
 
 // These keys are used in the getStoredComment method
@@ -56,8 +55,10 @@ NSString * const ReaderPostStoredCommentTextKey = @"comment";
 @dynamic readingTime;
 @dynamic crossPostMeta;
 @dynamic railcar;
+@dynamic inUse;
 
 @synthesize rendered;
+
 
 - (BOOL)isCrossPost
 {

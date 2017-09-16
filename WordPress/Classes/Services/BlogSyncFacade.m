@@ -16,7 +16,13 @@
 {
     NSManagedObjectContext *context = [[ContextManager sharedInstance] mainContext];
     BlogService *blogService = [[BlogService alloc] initWithManagedObjectContext:context];
-    [blogService syncBlogsForAccount:account success:success failure:failure];
+    [blogService syncBlogsForAccount:account success:^{
+        WP3DTouchShortcutCreator *shortcutCreator = [WP3DTouchShortcutCreator new];
+        [shortcutCreator createShortcutsIf3DTouchAvailable:YES];
+        if (success) {
+            success();
+        }
+    }  failure:failure];
 }
 
 - (void)syncBlogWithUsername:(NSString *)username
@@ -56,7 +62,7 @@
     if ([blog.options numberForKeyPath:@"blog_title.readonly"]) {
         blog.isAdmin = ![[blog.options numberForKeyPath:@"blog_title.readonly"] boolValue];
     }
-    [[ContextManager sharedInstance] saveContext:context];
+    [[ContextManager sharedInstance] saveContextAndWait:context];
 
     if (blog.jetpack.isInstalled) {
         if (blog.jetpack.isConnected) {
@@ -66,7 +72,7 @@
                 AccountService *accountService = [[AccountService alloc] initWithManagedObjectContext:context];
                 WPAccount *account = [accountService findAccountWithUsername:dotcomUsername];
                 if (account) {
-                    blog.jetpackAccount = account;
+                    blog.account = account;
                     [WPAppAnalytics track:WPAnalyticsStatSignedInToJetpack withBlog:blog];
                 }
             }

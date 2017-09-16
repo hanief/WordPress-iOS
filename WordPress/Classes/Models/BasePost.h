@@ -1,7 +1,7 @@
 #import <Foundation/Foundation.h>
 #import "Blog.h"
-#import "DateUtils.h"
 #import "PostContentProvider.h"
+@import WordPressShared;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -15,12 +15,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong, nullable) NSDate * date_created_gmt;
 @property (nonatomic, strong, nullable) NSString * postTitle;
 @property (nonatomic, strong, nullable) NSString * content;
-@property (nonatomic, strong, nullable) NSString * status;
 @property (nonatomic, strong, nullable) NSString * password;
 @property (nonatomic, strong, nullable) NSString * permaLink;
 @property (nonatomic, strong, nullable) NSString * mt_excerpt;
-@property (nonatomic, strong, nullable) NSString * mt_text_more;
 @property (nonatomic, strong, nullable) NSString * wp_slug;
+@property (nonatomic, strong, nullable) NSString * suggested_slug;
 @property (nonatomic, strong, nullable) NSNumber * remoteStatusNumber;
 @property (nonatomic, strong, nullable) NSNumber * post_thumbnail;
 
@@ -35,18 +34,8 @@ NS_ASSUME_NONNULL_BEGIN
  */
 @property (nonatomic, assign) BOOL isFeaturedImageChanged;
 
-/**
- Create a summary for the post based on the post's content.
-
- @param string The post's content string. This should be the formatted content string.
- @return A summary for the post.
- */
-+ (NSString *)summaryFromContent:(NSString *)string;
-
-
 //date conversion
-- (nullable NSDate *)dateCreated;
-- (void)setDateCreated:(nullable NSDate *)localDate;
+@property (nonatomic, strong, nullable) NSDate * dateCreated;
 
 //comments
 - (void)findComments;

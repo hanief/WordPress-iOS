@@ -1,6 +1,5 @@
 #import <XCTest/XCTest.h>
 #import <OCMock/OCMock.h>
-#import "WordPress-Swift.h"
 
 
 @interface PushNotificationsManagerTests : XCTestCase
@@ -29,36 +28,6 @@
     manager = [PushNotificationsManager new];
     XCTAssert([manager.deviceId isEmpty]);
     XCTAssert([manager.deviceToken isEmpty]);
-}
-
-- (void)testPushNotificationsAreDisabledInDeviceSettingsWhenRegisteredTypeIsNone
-{
-    id mockSettings = OCMPartialMock([[UIApplication sharedApplication] currentUserNotificationSettings]);
-    [OCMStub([mockSettings types]) andReturnValue:OCMOCK_VALUE(UIUserNotificationTypeNone)];
-    
-    id mockApplication = OCMPartialMock([UIApplication sharedApplication]);
-    [OCMStub([mockApplication currentUserNotificationSettings]) andReturn:mockSettings];
-    
-    PushNotificationsManager *manager = [PushNotificationsManager new];
-    id mockManager = OCMPartialMock(manager);
-    [OCMStub([mockManager sharedApplication]) andReturn:mockApplication];
-
-    XCTAssertFalse([mockManager notificationsEnabledInDeviceSettings]);
-}
-
-- (void)testPushNotificationsAreEnabledInDeviceSettingsWhenRegisteredTypeIsAlert
-{
-    id mockSettings = OCMPartialMock([[UIApplication sharedApplication] currentUserNotificationSettings]);
-    [OCMStub([mockSettings types]) andReturnValue:OCMOCK_VALUE(UIUserNotificationTypeAlert)];
-    
-    id mockApplication = OCMPartialMock([UIApplication sharedApplication]);
-    [OCMStub([mockApplication currentUserNotificationSettings]) andReturn:mockSettings];
-    
-    PushNotificationsManager *manager = [PushNotificationsManager new];
-    id mockManager = OCMPartialMock(manager);
-    [OCMStub([mockManager sharedApplication]) andReturn:mockApplication];
-    
-    XCTAssertTrue([mockManager notificationsEnabledInDeviceSettings]);
 }
 
 - (void)testRegisterForRemoteNotificationsCallsSharedApplicationRegisterForRemoteNotifications
@@ -102,11 +71,14 @@
     NSDictionary *userInfo = @{ @"type" : @"badge-reset"};
     PushNotificationsManager *manager = [PushNotificationsManager new];
     id mockManager = OCMPartialMock(manager);
-    
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-result"
     [[mockManager reject] handleAuthenticationNotification:OCMOCK_ANY completionHandler:OCMOCK_ANY];
     [[mockManager reject] handleHelpshiftNotification:OCMOCK_ANY completionHandler:OCMOCK_ANY];
     [[mockManager reject] handleInactiveNotification:OCMOCK_ANY completionHandler:OCMOCK_ANY];
     [[mockManager reject] handleBackgroundNotification:OCMOCK_ANY completionHandler:OCMOCK_ANY];
+#pragma clang diagnostic pop
     
     [mockManager handleNotification:userInfo completionHandler:nil];
     OCMVerify(mockManager);
@@ -115,6 +87,7 @@
 - (void)testHelpshiftNotificationIsProperlyHandled
 {
     NSDictionary *userInfo = @{ @"origin" : @"helpshift" };
+    [HelpshiftCore initializeWithProvider:[HelpshiftSupport sharedInstance]];
     PushNotificationsManager *manager = [PushNotificationsManager new];
     id mockManager = OCMPartialMock(manager);
     

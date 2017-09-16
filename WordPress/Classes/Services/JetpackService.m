@@ -1,11 +1,13 @@
 #import "JetpackService.h"
 #import "AccountService.h"
 #import "BlogService.h"
-#import "JetpackServiceRemote.h"
+@import WordPressKit;
 #import "WordPress-Swift.h"
 #import "ContextManager.h"
 #import "WPAccount.h"
 #import "Blog.h"
+
+NSString * const JetpackServiceErrorDomain = @"JetpackServiceErrorDomain";
 
 @implementation JetpackService
 
@@ -54,7 +56,7 @@
                   success:(void (^)(WPAccount *account))success
                   failure:(void (^)(NSError *error))failure
 {
-    WordPressComOAuthClient *client = [WordPressComOAuthClient client];
+    WordPressComOAuthClient *client = [WordPressComOAuthClient clientWithClientID:ApiCredentials.client secret:ApiCredentials.secret];
     [client authenticateWithUsername:username
                             password:password
                      multifactorCode:multifactorCode
@@ -89,7 +91,7 @@
 - (void)associateBlogIDs:(NSArray *)blogIDs withJetpackAccount:(WPAccount *)account
 {
     NSFetchRequest *request = [NSFetchRequest fetchRequestWithEntityName:NSStringFromClass([Blog class])];
-    request.predicate = [NSPredicate predicateWithFormat:@"account = NULL AND jetpackAccount = NULL"];
+    request.predicate = [NSPredicate predicateWithFormat:@"account = NULL"];
     NSArray *blogs = [self.managedObjectContext executeFetchRequest:request error:nil];
     NSSet *accountBlogIDs = [NSSet setWithArray:blogIDs];
     blogs = [blogs filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(id evaluatedObject, NSDictionary *bindings) {
@@ -97,7 +99,16 @@
         NSNumber *jetpackBlogID = blog.jetpack.siteID;
         return jetpackBlogID && [accountBlogIDs containsObject:jetpackBlogID];
     }]];
-    [account addJetpackBlogs:[NSSet setWithArray:blogs]];
+    [account addBlogs:[NSSet setWithArray:blogs]];
+}
+
+
+- (void)checkSiteHasJetpack:(NSURL *)siteURL
+                    success:(void (^)(BOOL hasJetpack))success
+                    failure:(void (^)(NSError *error))failure
+{
+    JetpackServiceRemote *remote = [[JetpackServiceRemote alloc] initWithWordPressComRestApi:[WordPressComRestApi anonymousApiWithUserAgent:WPUserAgent.wordPressUserAgent]];
+    [remote checkSiteHasJetpack:siteURL success:success failure:failure];
 }
 
 @end

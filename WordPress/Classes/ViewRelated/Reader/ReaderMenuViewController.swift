@@ -1,15 +1,16 @@
 import Foundation
+import CocoaLumberjack
 import Gridicons
 import WordPressShared
 
 
 /// The menu for the reader.
 ///
-@objc class ReaderMenuViewController : UITableViewController, UIViewControllerRestoration
-{
+@objc class ReaderMenuViewController: UITableViewController, UIViewControllerRestoration {
 
     static let restorationIdentifier = "ReaderMenuViewController"
     static let selectedIndexPathRestorationIdentifier = "ReaderMenuSelectedIndexPathKey"
+    static let currentReaderStreamIdentifier = "ReaderMenuCurrentStream"
 
     let defaultCellIdentifier = "DefaultCellIdentifier"
     let actionCellIdentifier = "ActionCellIdentifier"
@@ -18,11 +19,13 @@ import WordPressShared
     var isSyncing = false
     var didSyncTopics = false
 
-    private var defaultIndexPath: NSIndexPath {
-        return viewModel.indexPathOfDefaultMenuItemWithOrder(.Discover)
+    var currentReaderStream: ReaderStreamViewController?
+
+    fileprivate var defaultIndexPath: IndexPath {
+        return viewModel.indexPathOfDefaultMenuItemWithOrder(order: .followed)
     }
 
-    private var restorableSelectedIndexPath: NSIndexPath?
+    fileprivate var restorableSelectedIndexPath: IndexPath?
 
     lazy var viewModel: ReaderMenuViewModel = {
         let vm = ReaderMenuViewModel()
@@ -35,31 +38,39 @@ import WordPressShared
     /// - Returns: An instance of the controller.
     ///
     static func controller() -> ReaderMenuViewController {
-        return ReaderMenuViewController(style: .Grouped)
+        return ReaderMenuViewController(style: .grouped)
     }
 
     // MARK: - Restoration Methods
 
 
-    static func viewControllerWithRestorationIdentifierPath(identifierComponents: [AnyObject], coder: NSCoder) -> UIViewController? {
+    static func viewController(withRestorationIdentifierPath identifierComponents: [Any], coder: NSCoder) -> UIViewController? {
         return WPTabBarController.sharedInstance().readerMenuViewController
     }
 
-    override func encodeRestorableStateWithCoder(coder: NSCoder) {
-        coder.encodeObject(restorableSelectedIndexPath, forKey: self.dynamicType.selectedIndexPathRestorationIdentifier)
+    override func encodeRestorableState(with coder: NSCoder) {
+        coder.encode(restorableSelectedIndexPath, forKey: type(of: self).selectedIndexPathRestorationIdentifier)
+        coder.encode(currentReaderStream, forKey: type(of: self).currentReaderStreamIdentifier)
 
-        super.encodeRestorableStateWithCoder(coder)
+        super.encodeRestorableState(with: coder)
     }
 
-    override func decodeRestorableStateWithCoder(coder: NSCoder) {
-        decodeRestorableSelectedIndexPathWithCoder(coder)
+    override func decodeRestorableState(with coder: NSCoder) {
+        decodeRestorableSelectedIndexPathWithCoder(coder: coder)
+        decodeRestorableCurrentStreamWithCoder(coder: coder)
 
-        super.decodeRestorableStateWithCoder(coder)
+        super.decodeRestorableState(with: coder)
     }
 
-    private func decodeRestorableSelectedIndexPathWithCoder(coder: NSCoder) {
-        if let indexPath = coder.decodeObjectForKey(self.dynamicType.selectedIndexPathRestorationIdentifier) as? NSIndexPath {
+    fileprivate func decodeRestorableSelectedIndexPathWithCoder(coder: NSCoder) {
+        if let indexPath = coder.decodeObject(forKey: type(of: self).selectedIndexPathRestorationIdentifier) as? IndexPath {
             restorableSelectedIndexPath = indexPath
+        }
+    }
+
+    fileprivate func decodeRestorableCurrentStreamWithCoder(coder: NSCoder) {
+        if let currentStream = coder.decodeObject(forKey: type(of: self).currentReaderStreamIdentifier) as? ReaderStreamViewController {
+            currentReaderStream = currentStream
         }
     }
 
@@ -67,14 +78,16 @@ import WordPressShared
 
 
     deinit {
-        NSNotificationCenter.defaultCenter().removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
     }
 
 
     override init(style: UITableViewStyle) {
         super.init(style: style)
-        restorationIdentifier = self.dynamicType.restorationIdentifier
-        restorationClass = self.dynamicType
+        // Need to use `super` to work around a Swift compiler bug
+        // https://bugs.swift.org/browse/SR-3465
+        super.restorationIdentifier = ReaderMenuViewController.restorationIdentifier
+        restorationClass = ReaderMenuViewController.self
 
         clearsSelectionOnViewWillAppear = false
 
@@ -82,14 +95,14 @@ import WordPressShared
             restorableSelectedIndexPath = defaultIndexPath
         }
 
-        cleanupStaleContent(removeAllTopics: false)
         setupRefreshControl()
         setupAccountChangeNotificationObserver()
+        setupApplicationWillTerminateNotificationObserver()
     }
 
 
     required convenience init() {
-        self.init(style: .Grouped)
+        self.init(style: .grouped)
     }
 
 
@@ -106,7 +119,7 @@ import WordPressShared
         syncTopics()
     }
 
-    override func viewWillAppear(animated: Bool) {
+    override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
 
         // We shouldn't show a selection if our split view is collapsed
@@ -119,7 +132,7 @@ import WordPressShared
         reloadTableViewPreservingSelection()
     }
 
-    override func traitCollectionDidChange(previousTraitCollection: UITraitCollection?) {
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
 
         reloadTableViewPreservingSelection()
@@ -134,25 +147,41 @@ import WordPressShared
         }
 
         refreshControl = UIRefreshControl()
-        refreshControl?.addTarget(self, action: #selector(self.dynamicType.syncTopics), forControlEvents: .ValueChanged)
+        refreshControl?.addTarget(self, action: #selector(type(of: self).syncTopics), for: .valueChanged)
+    }
+
+
+    func setupApplicationWillTerminateNotificationObserver() {
+        NotificationCenter.default.addObserver(self, selector: #selector(type(of: self).handleApplicationWillTerminate), name: NSNotification.Name.UIApplicationWillTerminate, object: nil)
     }
 
 
     func setupAccountChangeNotificationObserver() {
-        NSNotificationCenter.defaultCenter().addObserver(self, selector: #selector(self.dynamicType.handleAccountChanged), name: WPAccountDefaultWordPressComAccountChangedNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(type(of: self).handleAccountChanged), name: NSNotification.Name.WPAccountDefaultWordPressComAccountChanged, object: nil)
     }
 
 
     func configureTableView() {
 
-        tableView.registerClass(WPTableViewCell.self, forCellReuseIdentifier: defaultCellIdentifier)
-        tableView.registerClass(WPTableViewCell.self, forCellReuseIdentifier: actionCellIdentifier)
+        tableView.register(WPTableViewCell.self, forCellReuseIdentifier: defaultCellIdentifier)
+        tableView.register(WPTableViewCell.self, forCellReuseIdentifier: actionCellIdentifier)
 
-        WPStyleGuide.configureColorsForView(view, andTableView: tableView)
+        WPStyleGuide.configureColors(for: view, andTableView: tableView)
+        WPStyleGuide.configureAutomaticHeightRows(for: tableView)
     }
 
 
-    // MARK: - Instance Methods
+    // MARK: - Cleanup Methods
+
+
+    /// Clears the inUse flag from any topics or posts so marked.
+    ///
+    func unflagInUseContent() {
+        let context = ContextManager.sharedInstance().mainContext
+        ReaderPostService(managedObjectContext: context).clearInUseFlags()
+        ReaderTopicService(managedObjectContext: context).clearInUseFlags()
+    }
+
 
     /// Clean up topics that do not belong in the menu and posts that have no topic
     /// This is merely a convenient place to perform this task.
@@ -169,10 +198,27 @@ import WordPressShared
     }
 
 
+    // MARK: - Instance Methods
+
+
+    /// Handle the UIApplicationWillTerminate notification.
+    //
+    func handleApplicationWillTerminate(_ notification: Foundation.Notification) {
+        // Its important to clean up stale content before unflagging, otherwise
+        // content we want to preserve for state restoration might also be
+        // deleted.
+        cleanupStaleContent(removeAllTopics: false)
+        unflagInUseContent()
+    }
+
     /// When logged out return the nav stack to the menu
     ///
-    func handleAccountChanged(notification: NSNotification) {
+    func handleAccountChanged(_ notification: Foundation.Notification) {
+        // Reset the selected index path
+        restorableSelectedIndexPath = defaultIndexPath
+
         // Clean up obsolete content.
+        unflagInUseContent()
         cleanupStaleContent(removeAllTopics: true)
 
         // Clean up stale search history
@@ -192,12 +238,12 @@ import WordPressShared
 
         isSyncing = true
         let service = ReaderTopicService(managedObjectContext: ContextManager.sharedInstance().mainContext)
-        service.fetchReaderMenuWithSuccess({ [weak self] in
+        service.fetchReaderMenu(success: { [weak self] in
                 self?.didSyncTopics = true
                 self?.cleanupAfterSync()
             }, failure: { [weak self] (error) in
                 self?.cleanupAfterSync()
-                DDLogSwift.logError("Error syncing menu: \(error)")
+                DDLogError("Error syncing menu: \(String(describing: error))")
         })
     }
 
@@ -217,9 +263,9 @@ import WordPressShared
     ///     - postID: The ID of the post on the specified blog.
     ///     - blogID: The ID of the blog.
     ///
-    func openPost(postID: NSNumber, onBlog blogID: NSNumber) {
+    func openPost(_ postID: NSNumber, onBlog blogID: NSNumber) {
         let controller = ReaderDetailViewController.controllerWithPostID(postID, siteID: blogID)
-        navigationController?.pushViewController(controller, animated: true)
+        navigationController?.pushFullscreenViewController(controller, animated: true)
     }
 
 
@@ -228,11 +274,11 @@ import WordPressShared
     /// - Parameters:
     ///     - topic: The topic to show.
     ///
-    func showPostsForTopic(topic: ReaderAbstractTopic) {
+    func showPostsForTopic(_ topic: ReaderAbstractTopic) {
         showDetailViewController(viewControllerForTopic(topic), sender: self)
     }
 
-    private func viewControllerForTopic(topic: ReaderAbstractTopic) -> ReaderStreamViewController {
+    fileprivate func viewControllerForTopic(_ topic: ReaderAbstractTopic) -> ReaderStreamViewController {
         return ReaderStreamViewController.controllerWithTopic(topic)
     }
 
@@ -242,7 +288,7 @@ import WordPressShared
         showDetailViewController(viewControllerForSearch(), sender: self)
     }
 
-    private func viewControllerForSearch() -> ReaderSearchViewController {
+    fileprivate func viewControllerForSearch() -> ReaderSearchViewController {
         return ReaderSearchViewController.controller()
     }
 
@@ -257,27 +303,27 @@ import WordPressShared
                 self.followTagNamed(value.trim())
             }
         }
-        controller.mode = .LowerCaseText
+        controller.mode = .lowerCaseText
         controller.displaysActionButton = true
         controller.actionText = NSLocalizedString("Add Tag", comment: "Button Title. Tapping subscribes the user to a new tag.")
         controller.onActionPress = {
             self.dismissModal()
         }
 
-        let cancelButton = UIBarButtonItem(barButtonSystemItem: .Cancel, target: self, action: #selector(ReaderMenuViewController.dismissModal))
+        let cancelButton = UIBarButtonItem(barButtonSystemItem: .cancel, target: self, action: #selector(ReaderMenuViewController.dismissModal))
         controller.navigationItem.leftBarButtonItem = cancelButton
 
         let navController = UINavigationController(rootViewController: controller)
-        navController.modalPresentationStyle = .FormSheet
+        navController.modalPresentationStyle = .formSheet
 
-        presentViewController(navController, animated: true, completion: nil)
+        present(navController, animated: true, completion: nil)
     }
 
 
     /// Dismisses a presented view controller.
     ///
     func dismissModal() {
-        dismissViewControllerAnimated(true, completion: nil)
+        dismiss(animated: true, completion: nil)
     }
 
 
@@ -289,11 +335,11 @@ import WordPressShared
     /// - Parameters:
     ///     - topic: The tag topic that is to be unfollowed.
     ///
-    func promptUnfollowTagTopic(topic: ReaderTagTopic) {
+    func promptUnfollowTagTopic(_ topic: ReaderTagTopic) {
         let title = NSLocalizedString("Remove", comment: "Title of a prompt asking the user to confirm they no longer wish to subscribe to a certain tag.")
-        let template = NSLocalizedString("Are you sure you wish to remove the tag '%@'", comment: "A short message asking the user if they wish to unfollow the specified tag. The %@ is a placeholder for the name of the tag.")
+        let template = NSLocalizedString("Are you sure you wish to remove the tag '%@'?", comment: "A short message asking the user if they wish to unfollow the specified tag. The %@ is a placeholder for the name of the tag.")
         let message = String(format: template, topic.title)
-        let alert = UIAlertController(title: title, message: message, preferredStyle: .Alert)
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addCancelActionWithTitle(NSLocalizedString("Cancel", comment: "Title of a cancel button.")) { (action) in
             self.tableView.setEditing(false, animated: true)
         }
@@ -309,14 +355,14 @@ import WordPressShared
     /// - Parameters:
     ///     - topic: The tag topic that is to be unfollowed.
     ///
-    func unfollowTagTopic(topic: ReaderTagTopic) {
+    func unfollowTagTopic(_ topic: ReaderTagTopic) {
         let service = ReaderTopicService(managedObjectContext: ContextManager.sharedInstance().mainContext)
         service.unfollowTag(topic, withSuccess: nil) { (error) in
-            DDLogSwift.logError("Could not unfollow topic \(topic), \(error)")
+            DDLogError("Could not unfollow topic \(topic), \(String(describing: error))")
 
             let title = NSLocalizedString("Could Not Remove Tag", comment: "Title of a prompt informing the user there was a probem unsubscribing from a tag in the reader.")
-            let message = error.localizedDescription
-            let alert = UIAlertController(title: title, message: message, preferredStyle: .Alert)
+            let message = error?.localizedDescription
+            let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
             alert.addCancelActionWithTitle(NSLocalizedString("OK", comment: "Button title. An acknowledgement of the message displayed in a prompt."))
             alert.presentFromRootViewController()
         }
@@ -328,11 +374,14 @@ import WordPressShared
     /// - Parameters:
     ///     - tagName: The name of the tag to follow.
     ///
-    func followTagNamed(tagName: String) {
+    func followTagNamed(_ tagName: String) {
         let service = ReaderTopicService(managedObjectContext: ContextManager.sharedInstance().mainContext)
 
+        let generator = UINotificationFeedbackGenerator()
+        generator.prepare()
+
         service.followTagNamed(tagName, withSuccess: { [weak self] in
-            WPNotificationFeedbackGenerator.notificationOccurred(.Success)
+            generator.notificationOccurred(.success)
 
             // A successful follow makes the new tag the currentTopic.
             if let tag = service.currentTopic as? ReaderTagTopic {
@@ -340,13 +389,13 @@ import WordPressShared
             }
 
             }, failure: { (error) in
-                DDLogSwift.logError("Could not follow tag named \(tagName) : \(error)")
+                DDLogError("Could not follow tag named \(tagName) : \(String(describing: error))")
 
-                WPNotificationFeedbackGenerator.notificationOccurred(.Error)
+                generator.notificationOccurred(.error)
 
                 let title = NSLocalizedString("Could Not Follow Tag", comment: "Title of a prompt informing the user there was a probem unsubscribing from a tag in the reader.")
-                let message = error.localizedDescription
-                let alert = UIAlertController(title: title, message: message, preferredStyle: .Alert)
+                let message = error?.localizedDescription
+                let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
                 alert.addCancelActionWithTitle(NSLocalizedString("OK", comment: "Button title. An acknowledgement of the message displayed in a prompt."))
                 alert.presentFromRootViewController()
         })
@@ -358,14 +407,14 @@ import WordPressShared
     /// - Paramters:
     ///     - tag: The tag to scroll into view.
     ///
-    func scrollToTag(tag: ReaderTagTopic) {
+    func scrollToTag(_ tag: ReaderTagTopic) {
         guard let indexPath = viewModel.indexPathOfTag(tag) else {
             return
         }
 
-        tableView.flashRowAtIndexPath(indexPath, scrollPosition: .Middle, completion: {
+        tableView.flashRowAtIndexPath(indexPath, scrollPosition: .middle, completion: {
             if !self.splitViewControllerIsHorizontallyCompact {
-                self.tableView(self.tableView, didSelectRowAtIndexPath: indexPath)
+                self.tableView(self.tableView, didSelectRowAt: indexPath)
             }
         })
     }
@@ -374,43 +423,43 @@ import WordPressShared
     // MARK: - TableView Delegate Methods
 
 
-    override func numberOfSectionsInTableView(tableView: UITableView) -> Int {
+    override func numberOfSections(in tableView: UITableView) -> Int {
         return viewModel.numberOfSectionsInMenu()
     }
 
 
-    override func tableView(tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return viewModel.numberOfItemsInSection(section)
     }
 
-    override func tableView(tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         return viewModel.titleForSection(section)
     }
 
-    override func tableView(tableView: UITableView, willDisplayHeaderView view: UIView, forSection section: Int) {
+    override func tableView(_ tableView: UITableView, willDisplayHeaderView view: UIView, forSection section: Int) {
         WPStyleGuide.configureTableViewSectionHeader(view)
     }
 
-    override func tableView(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath) -> UITableViewCell {
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let menuItem = viewModel.menuItemAtIndexPath(indexPath)
-        if menuItem?.type == .AddItem {
-            let cell = tableView.dequeueReusableCellWithIdentifier(actionCellIdentifier)!
+        if menuItem?.type == .addItem {
+            let cell = tableView.dequeueReusableCell(withIdentifier: actionCellIdentifier)!
             configureActionCell(cell, atIndexPath: indexPath)
             return cell
         }
 
-        let cell = tableView.dequeueReusableCellWithIdentifier(defaultCellIdentifier)!
+        let cell = tableView.dequeueReusableCell(withIdentifier: defaultCellIdentifier)!
         configureCell(cell, atIndexPath: indexPath)
         return cell
     }
 
 
-    override func tableView(tableView: UITableView, didSelectRowAtIndexPath indexPath: NSIndexPath) {
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         guard let menuItem = viewModel.menuItemAtIndexPath(indexPath) else {
             return
         }
 
-        if menuItem.type == .AddItem {
+        if menuItem.type == .addItem {
             tableView.deselectSelectedRowWithAnimation(true)
             showAddTag()
             return
@@ -423,12 +472,14 @@ import WordPressShared
         }
     }
 
-    private func viewControllerForMenuItem(menuItem: ReaderMenuItem) -> UIViewController? {
+    fileprivate func viewControllerForMenuItem(_ menuItem: ReaderMenuItem) -> UIViewController? {
         if let topic = menuItem.topic {
-            return viewControllerForTopic(topic)
+            currentReaderStream = viewControllerForTopic(topic)
+            return currentReaderStream
         }
 
-        if menuItem.type == .Search {
+        if menuItem.type == .search {
+            currentReaderStream = nil
             return viewControllerForSearch()
         }
 
@@ -436,21 +487,21 @@ import WordPressShared
     }
 
 
-    func configureCell(cell: UITableViewCell, atIndexPath indexPath: NSIndexPath) {
+    func configureCell(_ cell: UITableViewCell, atIndexPath indexPath: IndexPath) {
         guard let menuItem = viewModel.menuItemAtIndexPath(indexPath) else {
             return
         }
 
         WPStyleGuide.configureTableViewCell(cell)
         cell.accessoryView = nil
-        cell.accessoryType = (splitViewControllerIsHorizontallyCompact) ? .DisclosureIndicator : .None
-        cell.selectionStyle = .Default
+        cell.accessoryType = (splitViewControllerIsHorizontallyCompact) ? .disclosureIndicator : .none
+        cell.selectionStyle = .default
         cell.textLabel?.text = menuItem.title
         cell.imageView?.image = menuItem.icon
     }
 
 
-    func configureActionCell(cell: UITableViewCell, atIndexPath indexPath: NSIndexPath) {
+    func configureActionCell(_ cell: UITableViewCell, atIndexPath indexPath: IndexPath) {
         guard let menuItem = viewModel.menuItemAtIndexPath(indexPath) else {
             return
         }
@@ -458,20 +509,20 @@ import WordPressShared
         WPStyleGuide.configureTableViewActionCell(cell)
 
         if cell.accessoryView == nil {
-            let image = Gridicon.iconOfType(.Plus)
+            let image = Gridicon.iconOfType(.plus)
             let imageView = UIImageView(image: image)
             imageView.tintColor = WPStyleGuide.wordPressBlue()
             cell.accessoryView = imageView
         }
 
-        cell.selectionStyle = .Default
+        cell.selectionStyle = .default
         cell.imageView?.image = menuItem.icon
         cell.imageView?.tintColor = WPStyleGuide.wordPressBlue()
         cell.textLabel?.text = menuItem.title
     }
 
 
-    override func tableView(tableView: UITableView, canEditRowAtIndexPath indexPath: NSIndexPath) -> Bool {
+    override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
         if !ReaderHelpers.isLoggedIn() {
             return false
         }
@@ -488,7 +539,7 @@ import WordPressShared
     }
 
 
-    override func tableView(tableView: UITableView, commitEditingStyle editingStyle: UITableViewCellEditingStyle, forRowAtIndexPath indexPath: NSIndexPath) {
+    override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCellEditingStyle, forRowAt indexPath: IndexPath) {
         guard let menuItem = viewModel.menuItemAtIndexPath(indexPath) else {
             return
         }
@@ -501,25 +552,24 @@ import WordPressShared
     }
 
 
-    override func tableView(tableView: UITableView, editingStyleForRowAtIndexPath indexPath: NSIndexPath) -> UITableViewCellEditingStyle {
-        return .Delete
+    override func tableView(_ tableView: UITableView, editingStyleForRowAt indexPath: IndexPath) -> UITableViewCellEditingStyle {
+        return .delete
     }
 
 
-    override func tableView(tableView: UITableView, titleForDeleteConfirmationButtonForRowAtIndexPath indexPath: NSIndexPath) -> String? {
+    override func tableView(_ tableView: UITableView, titleForDeleteConfirmationButtonForRowAt indexPath: IndexPath) -> String? {
         return NSLocalizedString("Remove", comment: "Label of the table view cell's delete button, when unfollowing tags.")
     }
 }
 
 
-extension ReaderMenuViewController : ReaderMenuViewModelDelegate
-{
+extension ReaderMenuViewController : ReaderMenuViewModelDelegate {
 
     func menuDidReloadContent() {
         reloadTableViewPreservingSelection()
     }
 
-    func menuSectionDidChangeContent(index: Int) {
+    func menuSectionDidChangeContent(_ index: Int) {
         reloadTableViewPreservingSelection()
     }
 
@@ -530,21 +580,21 @@ extension ReaderMenuViewController : ReaderMenuViewModelDelegate
 
         // Show the current selection if our split view isn't collapsed
         if !splitViewControllerIsHorizontallyCompact {
-            tableView.selectRowAtIndexPath(selectedIndexPath,
-                                           animated: false, scrollPosition: .None)
+            tableView.selectRow(at: selectedIndexPath,
+                                           animated: false, scrollPosition: .none)
         }
     }
 
 }
 
 extension ReaderMenuViewController : WPSplitViewControllerDetailProvider {
-    func initialDetailViewControllerForSplitView(splitView: WPSplitViewController) -> UIViewController? {
+    func initialDetailViewControllerForSplitView(_ splitView: WPSplitViewController) -> UIViewController? {
         if restorableSelectedIndexPath == defaultIndexPath {
             let service = ReaderTopicService(managedObjectContext: ContextManager.sharedInstance().mainContext)
-            if let topic = service.topicForDiscover() {
-                return ReaderStreamViewController.controllerWithTopic(topic)
+            if let topic = service.topicForFollowedSites() {
+                return viewControllerForTopic(topic)
             } else {
-                restorableSelectedIndexPath = NSIndexPath(forRow: 0, inSection: 0)
+                restorableSelectedIndexPath = IndexPath(row: 0, section: 0)
                 if let item = viewModel.menuItemAtIndexPath(restorableSelectedIndexPath!) {
                     return viewControllerForMenuItem(item)
                 }

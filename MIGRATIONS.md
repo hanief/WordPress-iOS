@@ -3,6 +3,75 @@
 This file documents changes in the data model. Please explain any changes to the
 data model as well as any custom migrations.
 
+## WordPress 66
+- @elibud 2017-08-17
+- `BlogSettings` added the following Jetpack security settings properties: 
+    `jetpackMonitorEnabled`, `jetpackMonitorEmailNotifications`, `jetpackMonitorPushNotifications`, 
+    `jetpackBlockMaliciousLoginAttempts`, `jetpackSSOEnabled`, `jetpackSSOMatchAccountsByEmail`, 
+    `jetpackSSORequireTwoStepAuthentication` boolean, default `NO` and
+    `jetpackLoginWhiteListedIPAddresses` string set property.
+
+## WordPress 65
+- @elibud 2017-08-02
+- `Theme` added `themeUrl` string property.
+
+## WordPress 64
+- @elibud 2017-08-02
+- `Theme` added `custom` boolean property. Default `NO`.
+
+## WordPress 63
+- @koke 2017-07-31
+- `Role` added with `slug`, `name`, `blog`.
+- `Blog` added `roles` relationship.
+
+## WordPress 62
+- @koke 2017-07-21
+- `Blog` removed `jetpackAccount`
+- `WPAccount` removed `jetpackBlogs`
+- @koke 2017-07-19
+- `Blog` added `userID` Int64 property. Stores the current user ID.
+
+## WordPress 61
+- @kurzee 2017-06-16
+- `Media` added `localThumbnailIdentifier` string property. Stores the locally generated thumbnail identifier.
+
+## WordPress 60
+- @elibud 2017-05-31
+- `BlogSettings` added `iconMediaID` int_32 property. Stores the mediaID of the site's icon.
+
+## WordPress 59
+- @kurzee 2017-05-04
+- `MenuItem` added `classes` property.
+- @elibud 2017-04-26
+- `BasePost` added `suggested_slug` property.
+
+## WordPress 58
+- @elibud 2017-04-06
+- `Blog` added `hasPaidPlan` boolean property. Default `NO`. Not optional.
+
+## WordPress 57
+- @kurzee 2017-03-16
+- `Media` removed `orientation` property.
+- `Media` removed `progress` property.
+
+## WordPress 56
+- @jleandroperez 2017-02-22
+- `BasePost` removed `mt_text_more` property
+- @koke 2017-02-10
+- `Account` added `emailVerified` property.
+- @elibud 2017-02-02
+- `Post` added optional `disabledPublicizeConnections` transformable property.
+- `Post` added optional `publicizeMessage` and `publicizeMessageID` string properties.
+
+## WordPress 55
+- @aerych 2016-12-21
+- `ReaderPost` renamed `preserveForRestoration` to "inUse"
+- `ReaderAbstractTopic` renamed `preserveForRestoration` to "inUse"
+
+## WordPress 54
+- @aerych 2016-12-08
+- `ReaderPost` added `preserveForRestoration` boolean. Indexed. Default `NO`. Not optional.
+
 ## WordPress 53
 - @jleandroperez 2016-10-27
 - `Notification` added `notificationHash` property.

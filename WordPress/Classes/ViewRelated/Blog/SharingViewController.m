@@ -2,11 +2,11 @@
 #import "Blog.h"
 #import "BlogService.h"
 #import "SharingConnectionsViewController.h"
-#import "SVProgressHUD.h"
-#import "WPTableViewCell.h"
+#import "SVProgressHUD+Dismiss.h"
 #import "WordPress-Swift.h"
 #import <AFNetworking/UIImageView+AFNetworking.h>
 #import <WordPressShared/UIImage+Util.h>
+#import <WordPressShared/WPTableViewCell.h>
 
 typedef NS_ENUM(NSInteger, SharingSectionIdentifier){
     SharingPublicizeServices = 0,
@@ -123,6 +123,19 @@ static NSString *const CellIdentifier = @"CellIdentifier";
     }
 }
 
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    if ([self.publicizeServices count] > 0) {
+        PublicizeService *publicizer = self.publicizeServices[indexPath.row];
+        NSArray *connections = [self connectionsForService:publicizer];
+        if ([publicizer.serviceID isEqualToString:PublicizeService.googlePlusServiceID] && [connections count] == 0) { // Temporarily hiding Google+
+            return 0;
+        }
+    }
+    
+    return UITableViewAutomaticDimension;
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     WPTableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:CellIdentifier];
@@ -150,6 +163,11 @@ static NSString *const CellIdentifier = @"CellIdentifier";
 {
     PublicizeService *publicizer = self.publicizeServices[indexPath.row];
     NSArray *connections = [self connectionsForService:publicizer];
+    
+    if ([publicizer.serviceID isEqualToString:PublicizeService.googlePlusServiceID] && [connections count] == 0) { // Temporarily hiding Google+
+        cell.hidden = YES;
+        return;
+    }
 
     // Configure the image
     UIImage *image = [WPStyleGuide iconForService: publicizer.serviceID];
@@ -225,7 +243,7 @@ static NSString *const CellIdentifier = @"CellIdentifier";
     [sharingService syncPublicizeServicesForBlog:self.blog success:^{
         [weakSelf syncConnections];
     } failure:^(NSError *error) {
-        [SVProgressHUD showErrorWithStatus:NSLocalizedString(@"Publicize service synchronization failed", @"Message to show when Publicize service synchronization failed")];
+        [SVProgressHUD showDismissibleErrorWithStatus:NSLocalizedString(@"Publicize service synchronization failed", @"Message to show when Publicize service synchronization failed")];
         [weakSelf refreshPublicizers];
     }];
 }
@@ -237,7 +255,7 @@ static NSString *const CellIdentifier = @"CellIdentifier";
     [sharingService syncPublicizeConnectionsForBlog:self.blog success:^{
         [weakSelf refreshPublicizers];
     } failure:^(NSError *error) {
-        [SVProgressHUD showErrorWithStatus:NSLocalizedString(@"Publicize connection synchronization failed", @"Message to show when Publicize connection synchronization failed")];
+        [SVProgressHUD showDismissibleErrorWithStatus:NSLocalizedString(@"Publicize connection synchronization failed", @"Message to show when Publicize connection synchronization failed")];
         [weakSelf refreshPublicizers];
     }];
 }

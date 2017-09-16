@@ -1,17 +1,9 @@
 #import "AbstractPost.h"
 #import "Media.h"
 #import "ContextManager.h"
-#import "NSDate+StringFormatting.h"
 #import "WordPress-Swift.h"
 #import "BasePost.h"
-
-NSString * const PostStatusDraft = @"draft";
-NSString * const PostStatusPending = @"pending";
-NSString * const PostStatusPrivate = @"private";
-NSString * const PostStatusPublish = @"publish";
-NSString * const PostStatusScheduled = @"future";
-NSString * const PostStatusTrash = @"trash";
-NSString * const PostStatusDeleted = @"deleted"; // Returned by wpcom REST API when a post is permanently deleted.
+@import WordPressKit;
 
 @implementation AbstractPost
 
@@ -205,21 +197,16 @@ NSString * const PostStatusDeleted = @"deleted"; // Returned by wpcom REST API w
 - (void)cloneFrom:(AbstractPost *)source
 {
     for (NSString *key in [[[source entity] attributesByName] allKeys]) {
-        if ([key isEqualToString:@"permalink"]) {
-            DDLogInfo(@"Skipping %@", key);
-        } else {
-            DDLogInfo(@"Copying attribute %@", key);
+        if (![key isEqualToString:@"permalink"]) {
             [self setValue:[source valueForKey:key] forKey:key];
         }
     }
     for (NSString *key in [[[source entity] relationshipsByName] allKeys]) {
         if ([key isEqualToString:@"original"] || [key isEqualToString:@"revision"]) {
-            DDLogInfo(@"Skipping relationship %@", key);
+            continue;
         } else if ([key isEqualToString:@"comments"]) {
-            DDLogInfo(@"Copying relationship %@", key);
             [self setComments:[source comments]];
         } else {
-            DDLogInfo(@"Copying relationship %@", key);
             [self setValue: [source valueForKey:key] forKey: key];
         }
     }
@@ -469,7 +456,7 @@ NSString * const PostStatusDeleted = @"deleted"; // Returned by wpcom REST API w
 
 - (NSString *)authorNameForDisplay
 {
-    return self.author;
+    return [NSString makePlainText:self.author];
 }
 
 - (NSURL *)avatarURLForDisplay
@@ -479,7 +466,7 @@ NSString * const PostStatusDeleted = @"deleted"; // Returned by wpcom REST API w
 
 - (NSString *)blogNameForDisplay
 {
-    return self.blog.settings.name;
+    return [NSString makePlainText:self.blog.settings.name];
 }
 
 - (NSURL *)blogURL
@@ -505,14 +492,15 @@ NSString * const PostStatusDeleted = @"deleted"; // Returned by wpcom REST API w
 - (NSString *)dateStringForDisplay
 {
     if ([self isDraft] || [self.status isEqualToString:PostStatusPending]) {
-        NSString *shortDate = [[self dateModified] shortString];
+        NSString *shortDate = [[self dateModified] mediumString];
         NSString *lastModified = NSLocalizedString(@"last-modified",@"A label for a post's last-modified date.");
         return [NSString stringWithFormat:@"%@ (%@)", shortDate, lastModified];
-
+    } else if ([self isScheduled]) {
+        return [[self dateCreated] mediumStringWithTime];
     } else if ([self shouldPublishImmediately]) {
         return NSLocalizedString(@"Publish Immediately",@"A short phrase indicating a post is due to be immedately published.");
     }
-    return [[self dateCreated] shortString];
+    return [[self dateCreated] mediumString];
 }
 
 - (BOOL)supportsStats
@@ -603,6 +591,18 @@ NSString * const PostStatusDeleted = @"deleted"; // Returned by wpcom REST API w
         return YES;
     }
     
+    if (!([self.mt_excerpt length] == 0 && [original.mt_excerpt length] == 0)
+        && (![self.mt_excerpt isEqual:original.mt_excerpt]))
+    {
+        return YES;
+    }
+
+    if (!([self.wp_slug length] == 0 && [original.wp_slug length] == 0)
+        && (![self.wp_slug isEqual:original.wp_slug]))
+    {
+        return YES;
+    }
+
     return NO;
 }
 

@@ -9,7 +9,7 @@ whitelist_rules:
   # - closing_brace
 
   # Colons should be next to the identifier when specifying a type.
-  # - colon
+  - colon
 
   # There should be no space before and one after any comma.
   # - comma
@@ -30,6 +30,13 @@ whitelist_rules:
 
   # Prefer checking `isEmpty` over comparing `count` to zero.
   # - empty_count
+
+  # Arguments can be omitted when matching enums with associated types if they
+  # are not used.
+  - empty_enum_arguments
+
+  # Prefer `() -> ` over `Void -> `.
+  - empty_parameters
 
   # Files should not span too many lines.
   # - file_length
@@ -64,6 +71,9 @@ whitelist_rules:
   # Lines should not span too many characters.
   # - line_length
 
+  # MARK comment should be in valid format.
+  - mark
+
   # Public declarations should be documented.
   # - missing_docs
 
@@ -73,7 +83,7 @@ whitelist_rules:
 
   # Opening braces should be preceded by a single space and on the same line as
   # the declaration.
-  # - opening_brace
+  - opening_brace
 
   # Operators should be surrounded by a single whitespace when defining them.
   # - operator_whitespace

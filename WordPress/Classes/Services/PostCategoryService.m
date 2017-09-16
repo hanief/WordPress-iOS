@@ -1,12 +1,8 @@
 #import "PostCategoryService.h"
 #import "PostCategory.h"
 #import "Blog.h"
-#import "RemotePostCategory.h"
 #import "ContextManager.h"
-#import "TaxonomyServiceRemote.h"
-#import "TaxonomyServiceRemoteREST.h"
-#import "TaxonomyServiceRemoteXMLRPC.h"
-#import "RemoteTaxonomyPaging.h"
+@import WordPressKit;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -187,8 +183,10 @@ NS_ASSUME_NONNULL_BEGIN
     [toDelete minusSet:remoteSet];
 
     if ([toDelete count] > 0) {
-        for (PostCategory *category in blog.categories) {
+        NSSet *blogCategories = [blog.categories copy];
+        for (PostCategory *category in blogCategories) {
             if ([toDelete containsObject:category.categoryID]) {
+                category.blog = nil;
                 [self.managedObjectContext deleteObject:category];
             }
         }

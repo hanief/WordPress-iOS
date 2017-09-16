@@ -2,11 +2,7 @@
 #import "Media.h"
 #import "NSMutableDictionary+Helpers.h"
 #import "ContextManager.h"
-#import <WordPressShared/NSString+Util.h>
-#import <WordPressShared/NSString+XMLExtensions.h>
-#import "NSString+Helpers.h"
-
-static const NSUInteger PostDerivedSummaryLength = 150;
+@import WordPressShared;
 
 @implementation BasePost
 
@@ -17,25 +13,16 @@ static const NSUInteger PostDerivedSummaryLength = 150;
 @dynamic date_created_gmt;
 @dynamic postID;
 @dynamic postTitle;
-@dynamic status;
 @dynamic password;
 @dynamic remoteStatusNumber;
 @dynamic permaLink;
 @dynamic mt_excerpt;
-@dynamic mt_text_more;
 @dynamic wp_slug;
+@dynamic suggested_slug;
 @dynamic post_thumbnail;
 @dynamic pathForDisplayImage;
 
 @synthesize isFeaturedImageChanged;
-
-+ (NSString *)summaryFromContent:(NSString *)string
-{
-    string = [NSString makePlainText:string];
-    string = [NSString stripShortcodesFromString:string];
-    string = [string stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"\n"]];
-    return [string stringByEllipsizingWithMaxLength:PostDerivedSummaryLength preserveWords:YES];
-}
 
 - (NSDate *)dateCreated
 {
@@ -98,9 +85,17 @@ static const NSUInteger PostDerivedSummaryLength = 150;
     return [self dateCreated];
 }
 
+- (NSString *)slugForDisplay
+{
+    if (self.wp_slug.length > 0) {
+        return self.wp_slug;
+    }
+    return self.suggested_slug;
+}
+
 - (NSString *)statusForDisplay
 {
-    return self.status;
+    return [self valueForKey:@"status"];
 }
 
 @end

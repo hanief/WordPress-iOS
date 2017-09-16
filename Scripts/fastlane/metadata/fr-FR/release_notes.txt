@@ -1,0 +1,2 @@
+Sites Jetpack : ajout du support des rôles personnalisés. 
+Plusieurs améliorations mineures et corrections de bogue.

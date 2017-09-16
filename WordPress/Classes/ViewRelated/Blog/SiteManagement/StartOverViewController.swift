@@ -1,15 +1,15 @@
 import UIKit
+import MessageUI
 import WordPressShared
 
  /// StartOverViewController allows user to trigger help session to remove site content.
  ///
-public class StartOverViewController: UITableViewController
-{
+open class StartOverViewController: UITableViewController, MFMailComposeViewControllerDelegate {
     // MARK: - Properties: must be set by creator
 
     /// The blog whose content we want to remove
     ///
-    var blog : Blog!
+    var blog: Blog!
 
     // MARK: - Properties: table content
 
@@ -23,10 +23,10 @@ public class StartOverViewController: UITableViewController
     let contactCell: UITableViewCell = {
         let contactTitle = NSLocalizedString("Contact Support", comment: "Button to contact support on Start Over settings page")
 
-        let actionCell = WPTableViewCellDefault(style: .Value1, reuseIdentifier: nil)
+        let actionCell = WPTableViewCellDefault(style: .value1, reuseIdentifier: nil)
         actionCell.textLabel?.text = contactTitle
         WPStyleGuide.configureTableViewActionCell(actionCell)
-        actionCell.textLabel?.textAlignment = .Center
+        actionCell.textLabel?.textAlignment = .center
 
         return actionCell
     }()
@@ -38,86 +38,120 @@ public class StartOverViewController: UITableViewController
     /// - Parameter blog: The Blog currently at the site
     ///
     convenience init(blog: Blog) {
-        self.init(style: .Grouped)
+        self.init(style: .grouped)
         self.blog = blog
     }
 
     // MARK: - View Lifecycle
 
-    override public func viewDidLoad() {
+    override open func viewDidLoad() {
         super.viewDidLoad()
 
         title = NSLocalizedString("Start Over", comment: "Title of Start Over settings page")
 
-        WPStyleGuide.configureColorsForView(view, andTableView: tableView)
+        tableView.cellLayoutMarginsFollowReadableWidth = true
+        tableView.estimatedSectionHeaderHeight = 100.0
+        tableView.sectionHeaderHeight = UITableViewAutomaticDimension
+
+        WPStyleGuide.configureColors(for: view, andTableView: tableView)
     }
 
     // MARK: Table View Data Source
 
-    override public func numberOfSectionsInTableView(tableView: UITableView) -> Int {
+    override open func numberOfSections(in tableView: UITableView) -> Int {
         return 1
     }
 
-    override public func tableView(tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+    override open func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return 1
     }
 
-    override public func tableView(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath) -> UITableViewCell {
+    override open func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         return contactCell
     }
 
     // MARK: - Table View Delegate
 
-    override public func tableView(tableView: UITableView, didSelectRowAtIndexPath indexPath: NSIndexPath) {
+    override open func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         contactSupport()
     }
 
-    override public func tableView(tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+    override open func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
         return headerView
-    }
-
-    override public func tableView(tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        headerView.layoutWidth = tableView.frame.width
-        let height = headerView.intrinsicContentSize().height
-
-        return height
     }
 
     // MARK: - Actions
 
-    private func contactSupport() {
+    fileprivate func contactSupport() {
         tableView.deselectSelectedRowWithAnimation(true)
 
-        WPAppAnalytics.track(.SiteSettingsStartOverContactSupportClicked, withBlog: blog)
-        if HelpshiftUtils.isHelpshiftEnabled() {
-            setupHelpshift(blog.account!)
-
-            let metadata = helpshiftMetadata(blog)
-            HelpshiftSupport.showConversation(self, withOptions: metadata)
+        WPAppAnalytics.track(.siteSettingsStartOverContactSupportClicked, with: blog)
+        if MFMailComposeViewController.canSendMail() {
+            showAppleMailComposer()
+        } else if let googleMailURL = googleMailURL,
+                UIApplication.shared.canOpenURL(googleMailURL) {
+            showGoogleMailComposerForURL(googleMailURL)
         } else {
-            if let contact = NSURL(string: "https://support.wordpress.com/contact/") {
-                UIApplication.sharedApplication().openURL(contact)
-            }
+            showAlertToSendEmail()
         }
     }
 
-    private func setupHelpshift(account: WPAccount) {
-        let user = account.userID.stringValue
-        HelpshiftSupport.setUserIdentifier(user)
+    // Mark - Email handling
 
-        let name = account.username
-        let email = account.email
-        HelpshiftCore.setName(name, andEmail: email)
+    let mailRecipient = "help@wordpress.com"
+
+    var mailSubject: String {
+        guard let displayURL = self.blog.displayURL else {
+            return "Start over"
+        }
+        return "Start over with site \(displayURL)"
     }
 
-    private func helpshiftMetadata(blog: Blog) -> [NSObject: AnyObject] {
-        let tags = blog.account.map({ HelpshiftUtils.planTagsForAccount($0) }) ?? []
-        let options: [String: AnyObject] = [
-            "Source": "Start Over",
-            "Blog": blog.logDescription(),
-            HelpshiftSupportTagsKey: tags
-            ]
+    var mailBody: String {
+        guard let siteURL = self.blog.url else {
+            return "I want to start over"
+        }
+        return "I want to start over with the site \(siteURL)"
+    }
 
-        return [HelpshiftSupportCustomMetadataKey: options]
+    var googleMailURL: URL? {
+        let googleMailString = "googlegmail:///co?to=\(mailRecipient)"
+            + "&subject=\(mailSubject)&body=\(mailBody)"
+        return URL(string: googleMailString.addingPercentEncoding(withAllowedCharacters: NSCharacterSet.urlQueryAllowed)!)
+    }
+
+    func showAppleMailComposer() {
+        let mailComposeController = MFMailComposeViewController()
+        mailComposeController.mailComposeDelegate = self
+        mailComposeController.setToRecipients([mailRecipient])
+        mailComposeController.setSubject(mailSubject)
+        mailComposeController.setMessageBody(mailBody, isHTML: false)
+        present(mailComposeController, animated: true, completion: nil)
+    }
+
+    func showGoogleMailComposerForURL(_ url: URL ) {
+        UIApplication.shared.open(url)
+    }
+
+    func showAlertToSendEmail() {
+        let title = String(format: NSLocalizedString("Contact us at %@", comment: "Alert title for contact us alert, placeholder for help email address, inserted at run time."), mailRecipient)
+        let message = NSLocalizedString("\nPlease send us an email to have your content cleared out.", comment: "Message to ask the user to send us an email to clear their content.")
+
+        let alertController =  UIAlertController(title: title,
+                                                 message: message,
+                                                 preferredStyle: .alert)
+        alertController.addCancelActionWithTitle(NSLocalizedString("OK",
+                                                 comment: "Button title. An acknowledgement of the message displayed in a prompt."))
+        alertController.presentFromRootViewController()
+    }
+
+
+    // MARK: - MFMailComposeViewControllerDelegate Method
+
+    public func mailComposeController(_ controller: MFMailComposeViewController, didFinishWith result: MFMailComposeResult, error: Error?) {
+        controller.dismiss(animated: true, completion: nil)
+        if let _ = error {
+            showAlertToSendEmail()
+        }
     }
 }

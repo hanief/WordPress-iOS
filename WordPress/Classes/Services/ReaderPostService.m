@@ -2,19 +2,16 @@
 
 #import "AccountService.h"
 #import "ContextManager.h"
-#import "DateUtils.h"
-#import "NSString+Helpers.h"
-#import "NSString+XMLExtensions.h"
 #import "ReaderGapMarker.h"
 #import "ReaderPost.h"
-#import "ReaderPostServiceRemote.h"
 #import "ReaderSiteService.h"
-#import "RemoteReaderPost.h"
-#import "RemoteSourcePostAttribution.h"
 #import "SourcePostAttribution.h"
 #import "WPAccount.h"
-#import "WordPress-Swift.h"
 #import "WPAppAnalytics.h"
+#import <WordPressShared/NSString+XMLExtensions.h>
+#import "WordPress-Swift.h"
+@import WordPressKit;
+@import WordPressShared;
 
 NSUInteger const ReaderPostServiceNumberToSync = 40;
 // NOTE: The search endpoint is currently capped to max results of 20 and returns
@@ -172,10 +169,13 @@ static NSString * const SourceAttributionStandardTaxonomy = @"standard-pick";
 
 - (void)refreshPostsForFollowedTopic
 {
-    ReaderTopicService *topicService = [[ReaderTopicService alloc] initWithManagedObjectContext:self.managedObjectContext];
+    // Do all of this work on a background thread.
+    NSManagedObjectContext *context = [[ContextManager sharedInstance] newDerivedContext];
+    ReaderTopicService *topicService = [[ReaderTopicService alloc] initWithManagedObjectContext:context];
     ReaderAbstractTopic *topic = [topicService topicForFollowedSites];
     if (topic) {
-        [self fetchPostsForTopic:topic earlierThan:[NSDate date] deletingEarlier:YES success:nil failure:nil];
+        ReaderPostService *service = [[ReaderPostService alloc] initWithManagedObjectContext:context];
+        [service fetchPostsForTopic:topic earlierThan:[NSDate date] deletingEarlier:YES success:nil failure:nil];
     }
 }
 
@@ -371,13 +371,12 @@ static NSString * const SourceAttributionStandardTaxonomy = @"standard-pick";
     }
 }
 
-
 - (void)deletePostsWithNoTopic
 {
     NSError *error;
     NSFetchRequest *fetchRequest = [[NSFetchRequest alloc] initWithEntityName:@"ReaderPost"];
 
-    NSPredicate *pred = [NSPredicate predicateWithFormat:@"topic = NULL"];
+    NSPredicate *pred = [NSPredicate predicateWithFormat:@"topic = NULL AND inUse = false"];
     [fetchRequest setPredicate:pred];
 
     NSArray *arr = [self.managedObjectContext executeFetchRequest:fetchRequest error:&error];
@@ -392,6 +391,24 @@ static NSString * const SourceAttributionStandardTaxonomy = @"standard-pick";
     }
 
     [[ContextManager sharedInstance] saveContext:self.managedObjectContext];
+}
+
+- (void)clearInUseFlags
+{
+    NSError *error;
+    NSFetchRequest *request = [[NSFetchRequest alloc] initWithEntityName:@"ReaderPost"];
+    request.predicate = [NSPredicate predicateWithFormat:@"inUse = true"];
+    NSArray *results = [self.managedObjectContext executeFetchRequest:request error:&error];
+    if (error) {
+        DDLogError(@"%@, marking posts not in use.: %@", NSStringFromSelector(_cmd), error);
+        return;
+    }
+
+    for (ReaderPost *post in results) {
+        post.inUse = NO;
+    }
+
+    [[ContextManager sharedInstance] saveContextAndWait:self.managedObjectContext];
 }
 
 - (void)setFollowing:(BOOL)following forPostsFromSiteWithID:(NSNumber *)siteID andURL:(NSString *)siteURL
@@ -652,7 +669,16 @@ static NSString * const SourceAttributionStandardTaxonomy = @"standard-pick";
         [self deletePostsInExcessOfMaxAllowedForTopic:readerTopic];
         [self deletePostsFromBlockedSites];
 
-        BOOL hasMore = ((postsCount > 0 ) && ([self numberOfPostsForTopic:readerTopic] < [self maxPostsToSaveForTopic:readerTopic]));
+        BOOL hasMore = NO;
+        BOOL spaceAvailable = ([self numberOfPostsForTopic:readerTopic] < [self maxPostsToSaveForTopic:readerTopic]);
+        if ([ReaderHelpers isTopicTag:readerTopic]) {
+            // For tags, assume there is more content as long as more than zero results are returned.
+            hasMore = (postsCount > 0 ) && spaceAvailable;
+        } else {
+            // For other topics, assume there is more content as long as the number of results requested is returned.
+            hasMore = ([remotePosts count] == [self numberToSyncForTopic:readerTopic]) && spaceAvailable;
+        }
+
         [[ContextManager sharedInstance] saveContext:self.managedObjectContext withCompletionBlock:^{
             // Is called on main queue
             if (success) {
@@ -856,7 +882,14 @@ static NSString * const SourceAttributionStandardTaxonomy = @"standard-pick";
     }
 
     for (ReaderPost *post in currentPosts) {
-        if (![posts containsObject:post]) {
+        if ([posts containsObject:post]) {
+            continue;
+        }
+        // The post was missing from the batch and needs to be cleaned up.
+        if (post.inUse) {
+            // If the missing post is currenty being used just remove its topic.
+            post.topic = nil;
+        } else {
             DDLogInfo(@"Deleting ReaderPost: %@", post);
             [self.managedObjectContext deleteObject:post];
         }
@@ -900,8 +933,12 @@ static NSString * const SourceAttributionStandardTaxonomy = @"standard-pick";
     NSRange range = NSMakeRange(maxPosts, [posts count] - maxPosts);
     NSArray *postsToDelete = [posts subarrayWithRange:range];
     for (ReaderPost *post in postsToDelete) {
-        DDLogInfo(@"Deleting ReaderPost: %@", post.postTitle);
-        [self.managedObjectContext deleteObject:post];
+        if (post.inUse) {
+            post.topic = nil;
+        } else {
+            DDLogInfo(@"Deleting ReaderPost: %@", post.postTitle);
+            [self.managedObjectContext deleteObject:post];
+        }
     }
 
     // If the last remaining post is a gap marker, remove it.
@@ -933,8 +970,13 @@ static NSString * const SourceAttributionStandardTaxonomy = @"standard-pick";
     }
 
     for (ReaderPost *post in results) {
-        DDLogInfo(@"Deleting post: %@", post);
-        [self.managedObjectContext deleteObject:post];
+        if (post.inUse) {
+            // If the missing post is currenty being used just remove its topic.
+            post.topic = nil;
+        } else {
+            DDLogInfo(@"Deleting ReaderPost: %@", post.postTitle);
+            [self.managedObjectContext deleteObject:post];
+        }
     }
 }
 

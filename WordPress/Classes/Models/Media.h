@@ -2,69 +2,87 @@
 #import "Blog.h"
 #import "AbstractPost.h"
 
+NS_ASSUME_NONNULL_BEGIN
+
 typedef NS_ENUM(NSUInteger, MediaRemoteStatus) {
-    MediaRemoteStatusSync,    // Post synced
-    MediaRemoteStatusFailed,      // Upload failed
-    MediaRemoteStatusLocal,       // Only local version
-    MediaRemoteStatusPushing,       // Uploading post
-    MediaRemoteStatusProcessing, // Intermediate status before uploading
+    MediaRemoteStatusSync,          /* Post synced. */
+    MediaRemoteStatusFailed,        /* Upload failed. */
+    MediaRemoteStatusLocal,         /* Only local version. */
+    MediaRemoteStatusPushing,       /* Uploading post. */
+    MediaRemoteStatusProcessing,    /* Intermediate status before uploading. */
 };
 
 typedef NS_ENUM(NSUInteger, MediaType) {
     MediaTypeImage,
     MediaTypeVideo,
     MediaTypeDocument,
-    MediaTypePowerpoint
-};
-
-typedef NS_ENUM(NSUInteger, MediaResize) {
-    MediaResizeSmall,
-    MediaResizeMedium,
-    MediaResizeLarge,
-    MediaResizeOriginal
-};
-
-typedef NS_ENUM(NSUInteger, MediaOrientation) {
-    MediaOrientationPortrait,
-    MediaOrientationLandscape
+    MediaTypePowerpoint,
+    MediaTypeAudio
 };
 
 @interface Media :  NSManagedObject
 
-@property (nonatomic, strong) NSNumber * mediaID;
-@property (nonatomic, strong) NSString * mediaTypeString;
+// Managed properties
+
+@property (nonatomic, strong, nullable) NSString *caption;
+@property (nonatomic, strong) NSDate *creationDate;
+@property (nonatomic, strong, nullable) NSString *desc;
+@property (nonatomic, strong, nullable) NSString *filename;
+@property (nonatomic, strong, nullable) NSNumber *filesize;
+@property (nonatomic, strong, nullable) NSNumber *height;
+@property (nonatomic, strong, nullable) NSNumber *length;
+@property (nonatomic, strong, nullable) NSString *localThumbnailIdentifier;
+@property (nonatomic, strong, nullable) NSString *localThumbnailURL;
+@property (nonatomic, strong, nullable) NSString *localURL;
+@property (nonatomic, strong, nullable) NSNumber *mediaID;
+@property (nonatomic, strong, nullable) NSString *mediaTypeString;
+@property (nonatomic, strong, nullable) NSNumber *postID;
+@property (nonatomic, strong, nullable) NSNumber *remoteStatusNumber;
+@property (nonatomic, strong, nullable) NSString *remoteThumbnailURL;
+@property (nonatomic, strong, nullable) NSString *remoteURL;
+@property (nonatomic, strong, nullable) NSString *shortcode;
+@property (nonatomic, strong, nullable) NSString *title;
+@property (nonatomic, strong, nullable) NSString *videopressGUID;
+@property (nonatomic, strong, nullable) NSNumber *width;
+
+// Relationships
+
+@property (nonatomic, strong) Blog *blog;
+@property (nonatomic, strong, nullable) NSSet *posts;
+
+// Helper properties
+
 @property (nonatomic, assign) MediaType mediaType;
-@property (nonatomic, strong) NSString * remoteURL;
-@property (nonatomic, strong) NSString * localURL;
-@property (nonatomic, strong) NSString * shortcode;
-@property (nonatomic, strong) NSNumber * length;
-@property (nonatomic, strong) NSString * title;
-@property (nonatomic, strong) NSString * filename;
-@property (nonatomic, strong) NSNumber * filesize;
-@property (nonatomic, strong) NSNumber * width;
-@property (nonatomic, strong) NSNumber * height;
-@property (nonatomic, strong) NSString * orientation DEPRECATED_ATTRIBUTE;
-@property (nonatomic, strong) NSDate * creationDate;
-@property (nonatomic, strong) NSString *videopressGUID;
-@property (nonatomic, weak, readonly) NSString * html;
-@property (nonatomic, strong) NSNumber * remoteStatusNumber;
 @property (nonatomic, assign) MediaRemoteStatus remoteStatus;
-@property (nonatomic, strong) NSString * caption;
-@property (nonatomic, strong) NSString * desc;
-@property (nonatomic, strong) Blog * blog;
-@property (nonatomic, strong) NSSet *posts;
-@property (nonatomic, assign, readonly) BOOL unattached;
-@property (nonatomic, assign, readonly) BOOL featured;
-@property (nonatomic, strong) NSString *absoluteLocalURL;
-@property (nonatomic, strong) NSString *remoteThumbnailURL;
-@property (nonatomic, strong) NSString *localThumbnailURL;
-@property (nonatomic, strong) NSString *absoluteThumbnailLocalURL;
-@property (nonatomic, strong, readonly) NSString *posterImageURL;
-@property (nonatomic, strong) NSNumber *postID;
 
+/**
+ Local file URL for the Media's asset. e.g. an image, video, gif or other file.
+ */
+@property (nonatomic, strong, nullable) NSURL *absoluteLocalURL;
 
-- (void)mediaTypeFromUrl:(NSString *)ext;
+/**
+ Local file URL for a preprocessed thumbnail of the Media's asset. This may be nil if the
+ thumbnail has been deleted from the cache directory.
+
+ Note: it is recommended to instead use MediaService to generate thumbnails with a preferred size.
+ */
+@property (nonatomic, strong, nullable) NSURL *absoluteThumbnailLocalURL;
+
+/// Returns true if the media object already exists on the server
+@property (nonatomic, readonly) BOOL hasRemote;
+
+// Helper methods
+
 + (NSString *)stringFromMediaType:(MediaType)mediaType;
+
+- (nullable NSString *)fileExtension;
+- (nullable NSString *)mimeType;
+
+- (void)setMediaTypeForExtension:(NSString *)extension;
+
+- (void)setMediaTypeForMimeType:(NSString *)mimeType;
+
+// CoreData helpers
 
 - (void)remove;
 - (void)save;
@@ -81,3 +99,5 @@ typedef NS_ENUM(NSUInteger, MediaOrientation) {
 - (void)removePosts:(NSSet *)values;
 
 @end
+
+NS_ASSUME_NONNULL_END

@@ -2,15 +2,14 @@
 #import "WordPressAppDelegate.h"
 #import "ReachabilityUtils.h"
 #import "WPActivityDefaults.h"
-#import "NSString+Helpers.h"
-#import "UIDevice+Helpers.h"
 #import "WPURLRequest.h"
 #import "WPUserAgent.h"
 #import "WPCookie.h"
 #import "Constants.h"
 #import "WPError.h"
-#import "UIImage+Util.h"
 #import "WPStyleGuide+WebView.h"
+#import <WordPressShared/UIImage+Util.h>
+#import <WordPressShared/UIDevice+Helpers.h>
 #import "WordPress-Swift.h"
 
 @import Gridicons;
@@ -42,8 +41,8 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
 
 @property (nonatomic,   weak) IBOutlet UIWebView                *webView;
 @property (nonatomic,   weak) IBOutlet UIProgressView           *progressView;
-@property (nonatomic, strong) IBOutlet UIBarButtonItem          *dismissButton;
-@property (nonatomic, strong) IBOutlet UIBarButtonItem          *optionsButton;
+@property (nonatomic, strong) UIBarButtonItem          *dismissButton;
+@property (nonatomic, strong) UIBarButtonItem          *optionsButton;
 
 @property (nonatomic,   weak) IBOutlet UIToolbar                *toolbar;
 @property (nonatomic,   weak) IBOutlet UIBarButtonItem          *backButton;
@@ -75,9 +74,7 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
 
     NSAssert(_webView,                 @"Missing Outlet!");
     NSAssert(_progressView,            @"Missing Outlet!");
-    NSAssert(_dismissButton,           @"Missing Outlet!");
-    NSAssert(_optionsButton,           @"Missing Outlet!");
-    
+
     NSAssert(_toolbar,                 @"Missing Outlet!");
     NSAssert(_backButton,              @"Missing Outlet!");
     NSAssert(_forwardButton,           @"Missing Outlet!");
@@ -90,16 +87,21 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
     self.navigationItem.titleView           = self.titleView;
     
     // Buttons
-    self.optionsButton.accessibilityLabel   = NSLocalizedString(@"Share",   @"Spoken accessibility label");
+    if (!self.optionsButton) {
+        self.optionsButton = [[UIBarButtonItem alloc] initWithImage:[Gridicon iconOfType:GridiconTypeShareIOS] style:UIBarButtonItemStylePlain target:self action:@selector(showLinkOptions)];
+
+        self.optionsButton.accessibilityLabel   = NSLocalizedString(@"Share",   @"Spoken accessibility label");
+    }
+
+    self.dismissButton = [[UIBarButtonItem alloc] initWithImage:[Gridicon iconOfType:GridiconTypeCross] style:UIBarButtonItemStylePlain target:self action:@selector(dismiss)];
+
     self.dismissButton.accessibilityLabel   = NSLocalizedString(@"Dismiss", @"Dismiss a view. Verb");
     self.backButton.accessibilityLabel      = NSLocalizedString(@"Back",    @"Previous web page");
     self.forwardButton.accessibilityLabel   = NSLocalizedString(@"Forward", @"Next web page");
     
-    self.optionsButton.image                = [Gridicon iconOfType:GridiconTypeShareIOS];
-    self.dismissButton.image                = [Gridicon iconOfType:GridiconTypeCross];
-    self.backButton.image                   = [Gridicon iconOfType:GridiconTypeChevronLeft];
-    self.forwardButton.image                = [Gridicon iconOfType:GridiconTypeChevronRight];
-    
+    self.backButton.image                   = [[Gridicon iconOfType:GridiconTypeChevronLeft] imageFlippedForRightToLeftLayoutDirection];
+    self.forwardButton.image                = [[Gridicon iconOfType:GridiconTypeChevronRight] imageFlippedForRightToLeftLayoutDirection];
+
     // Toolbar: Hidden by default!
     self.toolbar.barTintColor               = [UIColor whiteColor];
     self.backButton.tintColor               = [WPStyleGuide greyLighten10];
@@ -311,19 +313,11 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
 - (IBAction)showLinkOptions
 {
     NSString *permaLink             = [self documentPermalink];
-    NSString *title                 = [self documentTitle];
     NSMutableArray *activityItems   = [NSMutableArray array];
     
-    if (title) {
-        [activityItems addObject:title];
-    }
-
     [activityItems addObject:[NSURL URLWithString:permaLink]];
     
     UIActivityViewController *activityViewController = [[UIActivityViewController alloc] initWithActivityItems:activityItems applicationActivities:[WPActivityDefaults defaultActivities]];
-    if (title) {
-        [activityViewController setValue:title forKey:@"subject"];
-    }
     activityViewController.completionWithItemsHandler = ^(NSString *activityType, BOOL completed, NSArray *returnedItems, NSError *activityError) {
         if (!completed) {
             return;
@@ -356,6 +350,18 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
         return NO;
     }
     
+    // To handle WhatsApp and Telegraph shares
+    // Even though the documentation says that canOpenURL will only return YES for
+    // URLs configured on the plist under LSApplicationQueriesSchemes if we don't filter
+    // out http requests it also returns YES for those
+    if (![request.URL.scheme hasPrefix:@"http"]
+        && [[UIApplication sharedApplication] canOpenURL:request.URL]) {
+        [[UIApplication sharedApplication] openURL:request.URL
+                                           options:nil
+                                 completionHandler:nil];
+        return NO;
+    }
+
     //  Note:
     //  UIWebView callbacks will get hit for every frame that gets loaded. As a workaround, we'll consider
     //  we're in a "loading" state just for the Top Level request.
@@ -507,6 +513,17 @@ static NSInteger const WPWebViewErrorPluginHandledLoad = 204;
     
     WPWebViewController *webViewController = [WPWebViewController new];
     webViewController.url = url;
+    return webViewController;
+}
+
++ (instancetype)webViewControllerWithURL:(NSURL *)url
+                           optionsButton:(UIBarButtonItem *)button
+{
+    NSParameterAssert(url);
+
+    WPWebViewController *webViewController = [WPWebViewController new];
+    webViewController.url = url;
+    webViewController.optionsButton = button;
     return webViewController;
 }
 
